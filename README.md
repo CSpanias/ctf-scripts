@@ -8,7 +8,7 @@ A collection of small, efficient scripts I use while working on CTF challenges a
 
 ### `nmap_scan.sh`
 
-A wrapper around Nmap that automates a full TCP scan, extracts open ports, performs aggressive scanning on open ports, and finishes with a top 1000 UDP ports scan.
+A wrapper around Nmap that automates a full TCP scan, extracts open ports, performs aggressive scanning on those ports, and finishes with a top 1000 UDP ports scan.
 
 #### 🔧 Features
 
@@ -16,6 +16,8 @@ A wrapper around Nmap that automates a full TCP scan, extracts open ports, perfo
 - Full TCP port scan with `-p-`
 - Auto-extract and scan open ports with `-A`
 - Top 1000 UDP scan
+- Optional input list with -iL <file>
+- Live preview of aggressive scan results before long UDP scans
 - Neatly organized output under `scans/<IP>/`
 - Interactive option to view results immediately
 
@@ -24,6 +26,7 @@ A wrapper around Nmap that automates a full TCP scan, extracts open ports, perfo
 ```bash
 chmod +x nmap_scan.sh
 ./nmap_scan.sh <IP-ADDRESS>
+./nmap_scan.sh -iL ip_list.txt
 ```
 
 Example:
@@ -50,15 +53,16 @@ scans/10.10.10.10/
 - `nmap`
 - `bash`
 - `sudo` privileges for some scans
+- ✅ Ensure file uses UNIX (LF) line endings — convert with `dos2unix` if needed
 
 #### 📌 Notes
 - Designed for learning, not stealth.
 - Scans can be noisy; use responsibly.
 - Results are timestamped for comparison and auditing.
+- Aggressive TCP results are shown immediately to avoid waiting for slow UDP scans.
 
 💡 Planned Additions
-- SMB/HTTP enumeration helpers
-- Auto Fuff wrappers
+- WIP
 
 🧠 License
 MIT License — free to use, modify, and share.
