@@ -6,7 +6,7 @@ A collection of small, efficient scripts I use while working on CTF challenges a
 
 ## 📜 Included Tools
 
-### `nmap_scan.sh`
+### `nmap-scan.sh`
 
 A wrapper around Nmap that automates a full TCP scan, extracts open ports, performs aggressive scanning on those ports, and finishes with a top 1000 UDP ports scan.
 
