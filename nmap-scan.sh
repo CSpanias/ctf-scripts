@@ -3,6 +3,12 @@
 # ──────────────────────────────────────────────
 # Step 0: Argument parsing
 # ──────────────────────────────────────────────
+no_udp=0
+if [[ "$1" == "--no-udp" ]]; then
+  no_udp=1
+  shift
+fi
+
 if [[ "$1" == "-iL" && -n "$2" && -f "$2" ]]; then
   ip_list="$2"
 else
@@ -12,6 +18,7 @@ else
     echo "💡 Usage:"
     echo "   nmap_scan.sh <IP-ADDRESS>"
     echo "   nmap_scan.sh -iL <ip-list-file>"
+    echo "   nmap_scan.sh --no-udp <...>"
     exit 1
   fi
   ip_list=""
@@ -22,7 +29,7 @@ fi
 # ──────────────────────────────────────────────
 ips_to_scan=()
 if [[ -n "$ip_list" ]]; then
-  mapfile -t ips_to_scan < <(grep -Ev '^\s*($|#)' "$ip_list")  # skip empty lines and comments
+  mapfile -t ips_to_scan < <(grep -Ev '^\s*($|#)' "$ip_list")
 else
   ips_to_scan=("$IP")
 fi
@@ -31,41 +38,26 @@ fi
 # Step 1: Loop through IPs
 # ──────────────────────────────────────────────
 for IP in "${ips_to_scan[@]}"; do
-
-  # Timestamp for uniqueness
   NOW=$(date +"%Y%m%d_%H%M%S")
   SCAN_DIR="scans/${IP}"
 
   echo -e "\n🌐 [$IP] Starting scan sequence..."
 
-  # ──────────────────────────────────────────────
-  # Step 2: Check if host is online (non-ICMP)
-  # ──────────────────────────────────────────────
   echo "📡 [$IP] Checking if host is online (non-ICMP)..."
   nmap -Pn -sn "${IP}" -oG - | grep -q "Status: Up"
   if [[ $? -ne 0 ]]; then
-    echo "❌ [$IP] Host appears down or unreachable. Skipping scan."
+    echo "❌ [$IP] Host appears down. Skipping scan."
     continue
   fi
-  echo "✅ [$IP] Host is up (based on TCP ping)."
+  echo "✅ [$IP] Host is up."
 
-  # ──────────────────────────────────────────────
-  # Step 3: Prepare scan directory
-  # ──────────────────────────────────────────────
   echo "📂 [$IP] Preparing output directory..."
   mkdir -p "${SCAN_DIR}"
-  echo "✅ [$IP] Output directory: ${SCAN_DIR}"
 
-  # ──────────────────────────────────────────────
-  # Step 4: Initial full TCP port scan
-  # ──────────────────────────────────────────────
   echo "🔍 [$IP] Starting full TCP port scan..."
   sudo nmap -Pn -T4 -p- --min-rate=5000 -oA "${SCAN_DIR}/initial_port-scan_${NOW}" "${IP}" > /dev/null
   echo "✅ [$IP] Initial TCP scan complete."
 
-  # ──────────────────────────────────────────────
-  # Step 5: Extract open TCP ports
-  # ──────────────────────────────────────────────
   echo "📦 [$IP] Extracting open TCP ports..."
   grep -E '^[0-9]+/tcp' "${SCAN_DIR}/initial_port-scan_${NOW}.nmap" \
     | awk '{print $1}' \
@@ -73,32 +65,35 @@ for IP in "${ips_to_scan[@]}"; do
     | paste -sd, - \
     > "${SCAN_DIR}/open_ports_${NOW}"
 
-  open_ports=$(cat "${SCAN_DIR}/open_ports_${NOW}")
+  open_ports=$(<"${SCAN_DIR}/open_ports_${NOW}")
 
   if [[ -z "$open_ports" ]]; then
-    echo "❌ [$IP] No open TCP ports found. Skipping aggressive scan."
+    echo "❌ [$IP] No open TCP ports found."
   else
     echo "✅ [$IP] Open TCP ports: $open_ports"
     echo "🚀 [$IP] Running aggressive scan on open TCP ports..."
-    sudo nmap -Pn -T4 --min-rate=5000 -A -p "$open_ports" -oA "${SCAN_DIR}/aggressive_scan_${NOW}" "${IP}" > /dev/null
-    echo "✅ [$IP] Aggressive TCP scan completed."
-    
-    echo -e "\n📖 [$IP] Preview of aggressive TCP scan results:\n"
-    cat "${SCAN_DIR}/aggressive_scan_${NOW}.nmap" | head -n 50
-    echo "🔽 [$IP] Full results saved to: ${SCAN_DIR}/aggressive_scan_${NOW}.nmap"
-    echo "⏳ [$IP] Proceeding to UDP scan next (this may take a while)..."
+
+    sudo nmap -Pn -T4 -A -p "$open_ports" -oA "${SCAN_DIR}/aggressive_scan_${NOW}" "${IP}" > /dev/null
+    if [[ $? -ne 0 ]]; then
+      echo "⚠️ [$IP] Aggressive scan failed. Falling back to service/version scan..."
+      sudo nmap -Pn -T4 -sC -sV -p "$open_ports" -oA "${SCAN_DIR}/fallback_scan_${NOW}" "${IP}" > /dev/null
+      echo "✅ [$IP] Fallback scan completed."
+      echo "💾 [$IP] Fallback TCP scan saved: cat ${SCAN_DIR}/fallback_scan_${NOW}.nmap"
+    else
+      echo "✅ [$IP] Aggressive TCP scan completed."
+      echo "💾 [$IP] TCP scan saved: cat ${SCAN_DIR}/aggressive_scan_${NOW}.nmap"
+    fi
   fi
 
-  # ──────────────────────────────────────────────
-  # Step 6: Top 1000 UDP port scan
-  # ──────────────────────────────────────────────
+  if [[ $no_udp -eq 1 ]]; then
+    echo "⏩ [$IP] Skipping UDP scan as requested."
+    continue
+  fi
+
   echo "📡 [$IP] Starting top 1000 UDP port scan..."
-  sudo nmap -Pn -sU --top-ports 1000 -T4 -oA "${SCAN_DIR}/udp_scan_${NOW}" "${IP}" > /dev/null
+  sudo nmap -Pn -sU -sV --top-ports 1000 -T4 -oA "${SCAN_DIR}/udp_scan_${NOW}" "${IP}" > /dev/null
   echo "✅ [$IP] UDP scan complete."
 
-  # ──────────────────────────────────────────────
-  # Step 7: Extract open UDP ports
-  # ──────────────────────────────────────────────
   udp_ports=$(grep -E '^[0-9]+/udp' "${SCAN_DIR}/udp_scan_${NOW}.nmap" \
     | awk '{print $1}' \
     | grep -oE '^[0-9]+' \
@@ -107,27 +102,16 @@ for IP in "${ips_to_scan[@]}"; do
   if [[ -n "$udp_ports" ]]; then
     echo "✅ [$IP] Open UDP ports: $udp_ports"
   else
-    echo "ℹ️ [$IP] No open UDP ports detected in top 1000."
+    echo "ℹ️ [$IP] No open UDP ports found."
   fi
 
-  # ──────────────────────────────────────────────
-  # Step 8: Summary
-  # ──────────────────────────────────────────────
-  echo -e "\n🎉 [$IP] All done! Results saved to:"
-  echo "   📄 Initial TCP scan:   ${SCAN_DIR}/initial_port-scan_${NOW}.nmap"
-  echo "   📄 Open TCP ports:     ${SCAN_DIR}/open_ports_${NOW}"
-  [[ -n "$open_ports" ]] && echo "   📄 Aggressive TCP scan:${SCAN_DIR}/aggressive_scan_${NOW}.nmap"
-  echo "   📄 UDP scan:           ${SCAN_DIR}/udp_scan_${NOW}.nmap"
+  echo "💾 [$IP] UDP scan saved: cat ${SCAN_DIR}/udp_scan_${NOW}.nmap"
 
-  # ──────────────────────────────────────────────
-  # Step 9: Optional view
-  # ──────────────────────────────────────────────
-  read -rp "👀 [$IP] Do you want to view the aggressive TCP scan results now? [y/N]: " choice
-  if [[ "$choice" =~ ^[Yy]$ ]] && [[ -n "$open_ports" ]]; then
-    cat "${SCAN_DIR}/aggressive_scan_${NOW}.nmap"
-  else
-    echo "👍 [$IP] Skipping file view. You can read it later at:"
-    [[ -n "$open_ports" ]] && echo "   ${SCAN_DIR}/aggressive_scan_${NOW}.nmap"
-  fi
+  echo -e "\n🎉 [$IP] Done. Summary:"
+  echo "   📄 TCP port scan:     ${SCAN_DIR}/initial_port-scan_${NOW}.nmap"
+  echo "   📄 Open ports file:   ${SCAN_DIR}/open_ports_${NOW}"
+  [[ -n "$open_ports" ]] && echo "   📄 TCP scan:          ${SCAN_DIR}/aggressive_scan_${NOW}.nmap"
+  [[ -f "${SCAN_DIR}/fallback_scan_${NOW}.nmap" ]] && echo "   📄 Fallback scan:     ${SCAN_DIR}/fallback_scan_${NOW}.nmap"
+  echo "   📄 UDP scan:          ${SCAN_DIR}/udp_scan_${NOW}.nmap"
 
 done
