@@ -55,7 +55,7 @@ for IP in "${ips_to_scan[@]}"; do
   mkdir -p "${SCAN_DIR}"
 
   echo "🔍 [$IP] Starting full TCP port scan..."
-  sudo nmap -Pn -T4 -p- --min-rate=5000 -oA "${SCAN_DIR}/initial_port-scan_${NOW}" "${IP}" > /dev/null
+  sudo nmap -Pn -T4 -p- --min-rate=1000 -oA "${SCAN_DIR}/initial_port-scan_${NOW}" "${IP}" > /dev/null
   echo "✅ [$IP] Initial TCP scan complete."
 
   echo "📦 [$IP] Extracting open TCP ports..."
