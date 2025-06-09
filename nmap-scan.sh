@@ -4,25 +4,41 @@
 # Step 0: Argument parsing
 # ──────────────────────────────────────────────
 no_udp=0
-if [[ "$1" == "--no-udp" ]]; then
-  no_udp=1
+ip_list=""
+IP=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --no-udp)
+      no_udp=1
+      ;;
+    -iL)
+      shift
+      if [[ -n "$1" && -f "$1" ]]; then
+        ip_list="$1"
+      else
+        echo "❌ Invalid or missing input list file after -iL"
+        exit 1
+      fi
+      ;;
+    *)
+      if [[ -z "$IP" ]]; then
+        IP="$1"
+      fi
+      ;;
+  esac
   shift
+done
+
+if [[ -z "$ip_list" && -z "$IP" ]]; then
+  echo "❌ Missing IP address or input list!"
+  echo "💡 Usage:"
+  echo "   nmap_scan.sh <IP-ADDRESS>"
+  echo "   nmap_scan.sh -iL <ip-list-file>"
+  echo "   nmap_scan.sh --no-udp <...>"
+  exit 1
 fi
 
-if [[ "$1" == "-iL" && -n "$2" && -f "$2" ]]; then
-  ip_list="$2"
-else
-  IP="$1"
-  if [[ -z "$IP" ]]; then
-    echo "❌ Missing IP address or input list!"
-    echo "💡 Usage:"
-    echo "   nmap_scan.sh <IP-ADDRESS>"
-    echo "   nmap_scan.sh -iL <ip-list-file>"
-    echo "   nmap_scan.sh --no-udp <...>"
-    exit 1
-  fi
-  ip_list=""
-fi
 
 # ──────────────────────────────────────────────
 # Step 0.5: Populate list of IPs
