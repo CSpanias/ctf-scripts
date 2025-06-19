@@ -1,0 +1,98 @@
+#!/bin/bash
+#
+# subnet-blaster - A subnet IP scanner supporting 1, 2, or 3 octet prefixes.
+#
+# Original script by https://github.com/Jtgit4
+# Enhanced by ChatGPT to support variable octet prefixes and added comments.
+#
+# Usage:
+#   ./subnet-blaster [IP prefix]
+#
+# Examples:
+#   ./subnet-blaster 172          # scans 172.0.0.1-254 to 172.255.255.254
+#   ./subnet-blaster 172.16       # scans 172.16.0.1-254 to 172.16.255.254
+#   ./subnet-blaster 172.16.2     # scans 172.16.2.1-254 only
+#
+
+usage() {
+    echo "Usage: $0 [IP prefix]"
+    echo "Examples:"
+    echo "  $0 172          # scans 172.0.0.1-254 to 172.255.255.254"
+    echo "  $0 172.16       # scans 172.16.0.1-254 to 172.16.255.254"
+    echo "  $0 172.16.2     # scans 172.16.2.1-254"
+    exit 1
+}
+
+# Check if an argument was provided
+if [[ -z "$1" ]]; then
+    usage
+fi
+
+PREFIX=$1
+
+# Validate the prefix: it must be 1 to 3 octets, each 0-255
+if [[ ! $PREFIX =~ ^([0-9]{1,3})(\.([0-9]{1,3})(\.([0-9]{1,3}))?)?$ ]]; then
+    echo "[!] Invalid IP prefix format."
+    usage
+fi
+
+# Extract octets using regex capture groups
+OCT1=${BASH_REMATCH[1]}
+OCT2=${BASH_REMATCH[3]}
+OCT3=${BASH_REMATCH[5]}
+
+# Validate each octet range
+for oct in $OCT1 $OCT2 $OCT3; do
+    if [[ -n $oct ]] && ((oct < 0 || oct > 255)); then
+        echo "[!] Invalid octet value: $oct"
+        usage
+    fi
+done
+
+# Define scanning ranges for 2nd and 3rd octets based on input
+if [[ -z $OCT2 ]]; then
+    # Only 1 octet provided; scan 2nd and 3rd octet from 0-255
+    RANGE2=$(seq 0 255)
+    RANGE3=$(seq 0 255)
+elif [[ -z $OCT3 ]]; then
+    # 2 octets provided; scan 3rd octet 0-255
+    RANGE2=$OCT2
+    RANGE3=$(seq 0 255)
+else
+    # 3 octets provided; fixed 2nd and 3rd octet, only scan 4th octet
+    RANGE2=$OCT2
+    RANGE3=$OCT3
+fi
+
+echo "[*] Starting subnet sweep on prefix: $PREFIX.x.x"
+
+# Clear/create output file for live hosts
+> live-hosts.txt
+
+# Maximum number of concurrent ping jobs
+MAX_JOBS=50
+
+# Loop through the determined ranges and ping hosts
+for second in ${RANGE2[@]}; do
+    for third in ${RANGE3[@]}; do
+        # The 4th octet always scanned from 1 to 254 (exclude .0 and .255)
+        for fourth in $(seq 1 254); do
+            IP="$OCT1.$second.$third.$fourth"
+            echo -ne "Scanning: $IP\r"
+
+            # Ping once with 1 second timeout, if host replies add to live-hosts.txt
+            (ping -c 1 -W 1 "$IP" | grep -q "64 bytes" && echo "[+] Host Up: $IP" | tee -a live-hosts.txt) &
+
+            # Control concurrency by waiting when max jobs are running
+            while [ "$(jobs -r | wc -l)" -ge "$MAX_JOBS" ]; do
+                sleep 0.2
+                wait -n
+            done
+        done
+    done
+done
+
+# Wait for any remaining ping jobs to finish
+wait
+
+echo -e "\n[*] Scan complete. Live hosts written to 'live-hosts.txt'"
