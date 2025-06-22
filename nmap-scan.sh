@@ -255,10 +255,10 @@ scan_single_host() {
     fi
     
     if [[ $no_udp -eq 0 ]]; then
-        log INFO "[$ip] Starting UDP scan (top 100 ports)..."
+        log INFO "[$ip] Starting initial UDP scan (top 100 ports)..."
         if timeout "$timeout" sudo nmap -Pn -sU -sV --top-ports 100 "$timing" \
             -oA "$scan_dir/udp_scan_$timestamp" "$ip" > /dev/null 2>&1; then
-            log SUCCESS "[$ip] UDP scan completed: cat $scan_dir/udp_scan_$timestamp.nmap"
+            log SUCCESS "[$ip] Initial UDP scan completed: cat $scan_dir/udp_scan_$timestamp.nmap"
             
             local udp_ports=""
             if [[ -f "$scan_dir/udp_scan_$timestamp.nmap" ]]; then
@@ -266,10 +266,20 @@ scan_single_host() {
                     | cut -d'/' -f1 | paste -sd, -)
                 if [[ -n "$udp_ports" ]]; then
                     log SUCCESS "[$ip] Open UDP ports: $udp_ports"
+                    
+                    log INFO "[$ip] Running aggressive UDP scan on open ports..."
+                    if timeout "$timeout" sudo nmap -Pn -sU -sV -A -p "$udp_ports" "$timing" \
+                        -oA "$scan_dir/udp_aggressive_scan_$timestamp" "$ip" > /dev/null 2>&1; then
+                        log SUCCESS "[$ip] Aggressive UDP scan completed: cat $scan_dir/udp_aggressive_scan_$timestamp.nmap"
+                    else
+                        log WARNING "[$ip] Aggressive UDP scan failed or timed out"
+                    fi
+                else
+                    log INFO "[$ip] No open UDP ports found for aggressive scan"
                 fi
             fi
         else
-            log WARNING "[$ip] UDP scan failed or timed out"
+            log WARNING "[$ip] Initial UDP scan failed or timed out"
         fi
     else
         log INFO "[$ip] UDP scan skipped"
@@ -403,9 +413,19 @@ main() {
             local scan_dir="$output_dir/$target"
             if [[ -d "$scan_dir" ]]; then
                 local tcp_file=$(find "$scan_dir" -name "*aggressive_scan_$timestamp.nmap" -o -name "*fallback_scan_$timestamp.nmap" | head -1)
+                local udp_file=$(find "$scan_dir" -name "*udp_scan_$timestamp.nmap" | head -1)
+                local tcp_count=0
+                local udp_count=0
+                
                 if [[ -n "$tcp_file" ]]; then
-                    echo -e "${BLUE}  $target:${NC} $(grep -c "open" "$tcp_file" 2>/dev/null || echo "0") open TCP ports"
+                    tcp_count=$(grep -c "open" "$tcp_file" 2>/dev/null || echo "0")
                 fi
+                
+                if [[ -n "$udp_file" ]]; then
+                    udp_count=$(grep -c "open" "$udp_file" 2>/dev/null || echo "0")
+                fi
+                
+                echo -e "${BLUE}  $target:${NC} $tcp_count open TCP ports, $udp_count open UDP ports"
             fi
         done
     fi
