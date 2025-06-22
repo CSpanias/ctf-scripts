@@ -317,8 +317,8 @@ main() {
         fi
         local scan_dir="$output_dir/$target"
         
-        local current_pids=${#pids[@]}
-        while [[ $current_pids -ge $concurrent ]]; do
+        local scan_current_pids=${#pids[@]}
+        while [[ $scan_current_pids -ge $concurrent ]]; do
             for pid_idx in "${!pids[@]}"; do
                 if ! kill -0 "${pids[$pid_idx]}" 2>/dev/null; then
                     wait "${pids[$pid_idx]}"
@@ -331,7 +331,9 @@ main() {
                 fi
             done
             pids=("${pids[@]}")
-            current_pids=${#pids[@]}
+            scan_current_pids=${#pids[@]}
+            # Debug: print value before arithmetic
+            # echo "DEBUG: scan_current_pids=$scan_current_pids"
             sleep 1
         done
         
