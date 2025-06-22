@@ -319,15 +319,15 @@ main() {
         
         local current_pids=${#pids[@]}
         while [[ $current_pids -ge $concurrent ]]; do
-            for i in "${!pids[@]}"; do
-                if ! kill -0 "${pids[$i]}" 2>/dev/null; then
-                    wait "${pids[$i]}"
+            for pid_idx in "${!pids[@]}"; do
+                if ! kill -0 "${pids[$pid_idx]}" 2>/dev/null; then
+                    wait "${pids[$pid_idx]}"
                     if [[ $? -eq 0 ]]; then
                         scan_completed=$((scan_completed + 1))
                     else
                         scan_failed=$((scan_failed + 1))
                     fi
-                    unset "pids[$i]"
+                    unset "pids[$pid_idx]"
                 fi
             done
             pids=("${pids[@]}")
