@@ -42,7 +42,7 @@ TARGET can be:
     - FQDN (e.g., www.example.com)
 
 OPTIONS:
-    -iL <file>           Input list of targets (IPs or hostnames)
+    -iL <file>          Input list of targets (IPs or hostnames)
     --no-udp            Skip UDP scanning
     -j, --jobs <num>    Maximum concurrent scans (default: $MAX_CONCURRENT_SCANS)
     -q, --quiet         Reduce output verbosity
@@ -304,8 +304,8 @@ main() {
     
     local timestamp=$(date +"%Y%m%d_%H%M%S")
     local pids=()
-    local completed=0
-    local failed=0
+    local scan_completed=0
+    local scan_failed=0
     
     for target in "${valid_targets[@]}"; do
         local resolved_ip=""
@@ -322,9 +322,9 @@ main() {
                 if ! kill -0 "${pids[$i]}" 2>/dev/null; then
                     wait "${pids[$i]}"
                     if [[ $? -eq 0 ]]; then
-                        ((completed++))
+                        scan_completed=$((scan_completed + 1))
                     else
-                        ((failed++))
+                        scan_failed=$((scan_failed + 1))
                     fi
                     unset "pids[$i]"
                 fi
@@ -344,19 +344,19 @@ main() {
     for pid in "${pids[@]}"; do
         wait "$pid"
         if [[ $? -eq 0 ]]; then
-            ((completed++))
+            scan_completed=$((scan_completed + 1))
         else
-            ((failed++))
+            scan_failed=$((scan_failed + 1))
         fi
     done
     
     echo
     log SUCCESS "Scan completed! Summary:"
-    log INFO "  Completed: $completed"
-    log INFO "  Failed: $failed"
+    log INFO "  Completed: $scan_completed"
+    log INFO "  Failed: $scan_failed"
     log INFO "  Output directory: $output_dir"
     
-    if [[ $completed -gt 0 ]]; then
+    if [[ $scan_completed -gt 0 ]]; then
         echo
         log INFO "Quick results preview:"
         for target in "${valid_targets[@]}"; do
