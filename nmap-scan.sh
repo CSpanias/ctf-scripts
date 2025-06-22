@@ -33,11 +33,16 @@ show_help() {
     cat << EOF
 Nmap Scanner - Optimized for CTF and pentesting
 
-Usage: $0 [OPTIONS] <IP-ADDRESS>
-       $0 [OPTIONS] -iL <ip-list-file>
+Usage: $0 [OPTIONS] <TARGET>
+       $0 [OPTIONS] -iL <target-list-file>
+
+TARGET can be:
+    - IP address (e.g., 192.168.1.1)
+    - Hostname (e.g., charlie, server.local)
+    - FQDN (e.g., www.example.com)
 
 OPTIONS:
-    -iL <file>           Input list of IP addresses
+    -iL <file>           Input list of targets (IPs or hostnames)
     --no-udp            Skip UDP scanning
     -j, --jobs <num>    Maximum concurrent scans (default: $MAX_CONCURRENT_SCANS)
     -q, --quiet         Reduce output verbosity
@@ -48,6 +53,7 @@ OPTIONS:
 
 EXAMPLES:
     $0 10.10.10.10
+    $0 charlie
     $0 -iL targets.txt -j 5 --no-udp
     $0 -iL targets.txt -j 3 -t 1800 --timing -T3
 EOF
@@ -141,17 +147,51 @@ check_prerequisites() {
     fi
 }
 
-validate_ip() {
-    local ip="$1"
-    if [[ "$ip" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
-        IFS='.' read -r -a octets <<< "$ip"
+# Validate IP address or hostname and resolve to IP
+validate_and_resolve_target() {
+    local target="$1"
+    
+    # Check if it's a numeric IP address
+    if [[ "$target" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
+        IFS='.' read -r -a octets <<< "$target"
         for octet in "${octets[@]}"; do
             if [[ "$octet" -lt 0 || "$octet" -gt 255 ]]; then
                 return 1
             fi
         done
+        echo "$target"
         return 0
     fi
+    
+    # Try to resolve hostname to IP address using Linux methods
+    
+    # Method 1: nslookup
+    if command -v nslookup &> /dev/null; then
+        local resolved_ip=$(nslookup "$target" 2>/dev/null | grep -A1 "Name:" | tail -1 | awk '{print $2}')
+        if [[ -n "$resolved_ip" && "$resolved_ip" != "NXDOMAIN" ]]; then
+            echo "$resolved_ip"
+            return 0
+        fi
+    fi
+    
+    # Method 2: host command
+    if command -v host &> /dev/null; then
+        local resolved_ip=$(host "$target" 2>/dev/null | grep "has address" | head -1 | awk '{print $NF}')
+        if [[ -n "$resolved_ip" ]]; then
+            echo "$resolved_ip"
+            return 0
+        fi
+    fi
+    
+    # Method 3: getent hosts (reads /etc/hosts file)
+    if command -v getent &> /dev/null; then
+        local resolved_ip=$(getent hosts "$target" 2>/dev/null | awk '{print $1}')
+        if [[ -n "$resolved_ip" ]]; then
+            echo "$resolved_ip"
+            return 0
+        fi
+    fi
+    
     return 1
 }
 
@@ -237,21 +277,28 @@ main() {
         ips_to_scan=("$IP")
     fi
     
-    local valid_ips=()
-    for ip in "${ips_to_scan[@]}"; do
-        if validate_ip "$ip"; then
-            valid_ips+=("$ip")
+    local valid_targets=()
+    local target_to_ip=()
+    
+    for target in "${ips_to_scan[@]}"; do
+        local resolved_ip=$(validate_and_resolve_target "$target")
+        if [[ $? -eq 0 ]]; then
+            valid_targets+=("$target")
+            target_to_ip["$target"]="$resolved_ip"
+            if [[ "$target" != "$resolved_ip" ]]; then
+                log INFO "Resolved $target to $resolved_ip"
+            fi
         else
-            log WARNING "Invalid IP format: $ip (skipping)"
+            log WARNING "Invalid target or cannot resolve: $target (skipping)"
         fi
     done
     
-    if [[ ${#valid_ips[@]} -eq 0 ]]; then
-        log ERROR "No valid IP addresses to scan"
+    if [[ ${#valid_targets[@]} -eq 0 ]]; then
+        log ERROR "No valid targets to scan"
         exit 1
     fi
     
-    log INFO "Starting scan of ${#valid_ips[@]} host(s) with $concurrent concurrent jobs"
+    log INFO "Starting scan of ${#valid_targets[@]} target(s) with $concurrent concurrent jobs"
     
     mkdir -p "$output_dir"
     
@@ -260,8 +307,9 @@ main() {
     local completed=0
     local failed=0
     
-    for ip in "${valid_ips[@]}"; do
-        local scan_dir="$output_dir/$ip"
+    for target in "${valid_targets[@]}"; do
+        local resolved_ip="${target_to_ip[$target]}"
+        local scan_dir="$output_dir/$target"
         
         while [[ ${#pids[@]} -ge $concurrent ]]; do
             for i in "${!pids[@]}"; do
@@ -279,11 +327,11 @@ main() {
             sleep 1
         done
         
-        scan_single_host "$ip" "$scan_dir" "$timestamp" &
+        scan_single_host "$resolved_ip" "$scan_dir" "$timestamp" &
         pids+=($!)
         
         if [[ $quiet -eq 0 ]]; then
-            log INFO "Started scan for $ip (PID: $!)"
+            log INFO "Started scan for $target ($resolved_ip) (PID: $!)"
         fi
     done
     
@@ -305,12 +353,12 @@ main() {
     if [[ $completed -gt 0 ]]; then
         echo
         log INFO "Quick results preview:"
-        for ip in "${valid_ips[@]}"; do
-            local scan_dir="$output_dir/$ip"
+        for target in "${valid_targets[@]}"; do
+            local scan_dir="$output_dir/$target"
             if [[ -d "$scan_dir" ]]; then
                 local tcp_file=$(find "$scan_dir" -name "*aggressive_scan_$timestamp.nmap" -o -name "*fallback_scan_$timestamp.nmap" | head -1)
                 if [[ -n "$tcp_file" ]]; then
-                    echo -e "${BLUE}  $ip:${NC} $(grep -c "open" "$tcp_file" 2>/dev/null || echo "0") open TCP ports"
+                    echo -e "${BLUE}  $target:${NC} $(grep -c "open" "$tcp_file" 2>/dev/null || echo "0") open TCP ports"
                 fi
             fi
         done
