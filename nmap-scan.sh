@@ -284,7 +284,8 @@ main() {
         local resolved_ip=$(validate_and_resolve_target "$target")
         if [[ $? -eq 0 ]]; then
             valid_targets+=("$target")
-            target_to_ip["$target"]="$resolved_ip"
+            # Use a different approach to avoid arithmetic interpretation
+            eval "target_to_ip_${target//[^a-zA-Z0-9_]/_}=\"$resolved_ip\""
             if [[ "$target" != "$resolved_ip" ]]; then
                 log INFO "Resolved $target to $resolved_ip"
             fi
@@ -307,10 +308,15 @@ main() {
     local scan_completed=0
     local scan_failed=0
     
+    # Debug: Print initial values
+    echo "DEBUG: scan_completed=$scan_completed, scan_failed=$scan_failed, concurrent=$concurrent"
+    
     for target in "${valid_targets[@]}"; do
         local resolved_ip=""
-        if [[ -n "${target_to_ip[$target]:-}" ]]; then
-            resolved_ip="${target_to_ip[$target]}"
+        # Get the resolved IP using the new variable naming approach
+        local var_name="target_to_ip_${target//[^a-zA-Z0-9_]/_}"
+        if [[ -n "${!var_name:-}" ]]; then
+            resolved_ip="${!var_name}"
         else
             log ERROR "Could not resolve IP for target: $target"
             continue
@@ -318,22 +324,26 @@ main() {
         local scan_dir="$output_dir/$target"
         
         local scan_current_pids=${#pids[@]}
+        echo "DEBUG: scan_current_pids=$scan_current_pids, concurrent=$concurrent"
         while [[ $scan_current_pids -ge $concurrent ]]; do
             for pid_idx in "${!pids[@]}"; do
                 if ! kill -0 "${pids[$pid_idx]}" 2>/dev/null; then
                     wait "${pids[$pid_idx]}"
                     if [[ $? -eq 0 ]]; then
+                        echo "DEBUG: Before incrementing scan_completed=$scan_completed"
                         scan_completed=$((scan_completed + 1))
+                        echo "DEBUG: After incrementing scan_completed=$scan_completed"
                     else
+                        echo "DEBUG: Before incrementing scan_failed=$scan_failed"
                         scan_failed=$((scan_failed + 1))
+                        echo "DEBUG: After incrementing scan_failed=$scan_failed"
                     fi
                     unset "pids[$pid_idx]"
                 fi
             done
             pids=("${pids[@]}")
             scan_current_pids=${#pids[@]}
-            # Debug: print value before arithmetic
-            # echo "DEBUG: scan_current_pids=$scan_current_pids"
+            echo "DEBUG: Updated scan_current_pids=$scan_current_pids"
             sleep 1
         done
         
