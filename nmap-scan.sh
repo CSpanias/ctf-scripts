@@ -165,27 +165,27 @@ validate_and_resolve_target() {
     
     # Try to resolve hostname to IP address using Linux methods
     
-    # Method 1: nslookup
-    if command -v nslookup &> /dev/null; then
-        local resolved_ip=$(nslookup "$target" 2>/dev/null | grep -A1 "Name:" | tail -1 | awk '{print $2}')
-        if [[ -n "$resolved_ip" && "$resolved_ip" != "NXDOMAIN" ]]; then
-            echo "$resolved_ip"
-            return 0
-        fi
-    fi
-    
-    # Method 2: host command
-    if command -v host &> /dev/null; then
-        local resolved_ip=$(host "$target" 2>/dev/null | grep "has address" | head -1 | awk '{print $NF}')
+    # Method 1: getent hosts (reads /etc/hosts file) - PRIORITY
+    if command -v getent &> /dev/null; then
+        local resolved_ip=$(timeout 5 getent hosts "$target" 2>/dev/null | awk '{print $1}')
         if [[ -n "$resolved_ip" ]]; then
             echo "$resolved_ip"
             return 0
         fi
     fi
     
-    # Method 3: getent hosts (reads /etc/hosts file)
-    if command -v getent &> /dev/null; then
-        local resolved_ip=$(getent hosts "$target" 2>/dev/null | awk '{print $1}')
+    # Method 2: nslookup (with timeout)
+    if command -v nslookup &> /dev/null; then
+        local resolved_ip=$(timeout 5 nslookup "$target" 2>/dev/null | grep -A1 "Name:" | tail -1 | awk '{print $2}')
+        if [[ -n "$resolved_ip" && "$resolved_ip" != "NXDOMAIN" ]]; then
+            echo "$resolved_ip"
+            return 0
+        fi
+    fi
+    
+    # Method 3: host command (with timeout)
+    if command -v host &> /dev/null; then
+        local resolved_ip=$(timeout 5 host "$target" 2>/dev/null | grep "has address" | head -1 | awk '{print $NF}')
         if [[ -n "$resolved_ip" ]]; then
             echo "$resolved_ip"
             return 0
