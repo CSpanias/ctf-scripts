@@ -231,12 +231,12 @@ scan_single_host() {
         log INFO "[$ip] Running aggressive scan on open ports..."
         if timeout "$timeout" sudo nmap -Pn "$timing" -A -p "$open_ports" \
             -oA "$scan_dir/aggressive_scan_$timestamp" "$ip" > /dev/null 2>&1; then
-            log SUCCESS "[$ip] Aggressive TCP scan completed"
+            log SUCCESS "[$ip] Aggressive TCP scan completed: cat $scan_dir/aggressive_scan_$timestamp.nmap"
         else
             log WARNING "[$ip] Aggressive scan failed, trying fallback..."
             if timeout "$timeout" sudo nmap -Pn "$timing" -sC -sV -p "$open_ports" \
                 -oA "$scan_dir/fallback_scan_$timestamp" "$ip" > /dev/null 2>&1; then
-                log SUCCESS "[$ip] Fallback scan completed"
+                log SUCCESS "[$ip] Fallback scan completed: cat $scan_dir/fallback_scan_$timestamp.nmap"
             else
                 log ERROR "[$ip] Both aggressive and fallback scans failed"
             fi
@@ -244,10 +244,10 @@ scan_single_host() {
     fi
     
     if [[ $no_udp -eq 0 ]]; then
-        log INFO "[$ip] Starting UDP scan (top 1000 ports)..."
-        if timeout "$timeout" sudo nmap -Pn -sU -sV --top-ports 1000 "$timing" \
+        log INFO "[$ip] Starting UDP scan (top 100 ports)..."
+        if timeout "$timeout" sudo nmap -Pn -sU -sV --top-ports 100 "$timing" \
             -oA "$scan_dir/udp_scan_$timestamp" "$ip" > /dev/null 2>&1; then
-            log SUCCESS "[$ip] UDP scan completed"
+            log SUCCESS "[$ip] UDP scan completed: cat $scan_dir/udp_scan_$timestamp.nmap"
             
             local udp_ports=""
             if [[ -f "$scan_dir/udp_scan_$timestamp.nmap" ]]; then
