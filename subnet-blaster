@@ -14,85 +14,319 @@
 #   ./subnet-blaster 172.16.2     # scans 172.16.2.1-254 only
 #
 
-usage() {
-    echo "Usage: $0 [IP prefix]"
-    echo "Examples:"
-    echo "  $0 172          # scans 172.0.0.1-254 to 172.255.255.254"
-    echo "  $0 172.16       # scans 172.16.0.1-254 to 172.16.255.254"
-    echo "  $0 172.16.2     # scans 172.16.2.1-254"
-    exit 1
+set -euo pipefail
+
+# Configuration
+DEFAULT_MAX_JOBS=50
+DEFAULT_TIMEOUT=1
+DEFAULT_PREFIX="192.168"
+OUTPUT_FILE="live-hosts.txt"
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+# Variables
+max_jobs=$DEFAULT_MAX_JOBS
+timeout=$DEFAULT_TIMEOUT
+prefix=""
+output_file=$OUTPUT_FILE
+quiet=0
+show_progress=1
+
+show_help() {
+    cat << EOF
+Subnet Scanner - Fast subnet reconnaissance tool
+
+Usage: $0 [OPTIONS] [IP_PREFIX]
+
+OPTIONS:
+    -j, --jobs <num>     Maximum concurrent ping jobs (default: $DEFAULT_MAX_JOBS)
+    -t, --timeout <sec>  Ping timeout in seconds (default: $DEFAULT_TIMEOUT)
+    -o, --output <file>  Output file for live hosts (default: $OUTPUT_FILE)
+    -q, --quiet          Reduce output verbosity
+    --no-progress        Disable progress display
+    -h, --help           Show this help message
+
+EXAMPLES:
+    $0 172                    # Scan 172.0.0.1-254 to 172.255.255.254
+    $0 172.16                 # Scan 172.16.0.1-254 to 172.16.255.254
+    $0 172.16.2               # Scan 172.16.2.1-254 only
+    $0 -j 100 -t 2 10.0.0     # Scan with 100 concurrent jobs, 2s timeout
+    $0 -q -o results.txt 192.168.1  # Quiet mode, custom output file
+
+DEFAULT: If no prefix provided, scans $DEFAULT_PREFIX.0.1-254 to $DEFAULT_PREFIX.255.254
+EOF
 }
 
-# Check if an argument was provided
-if [[ -z "$1" ]]; then
-    usage
-fi
-
-PREFIX=$1
-
-# Validate the prefix: it must be 1 to 3 octets, each 0-255
-if [[ ! $PREFIX =~ ^([0-9]{1,3})(\.([0-9]{1,3})(\.([0-9]{1,3}))?)?$ ]]; then
-    echo "[!] Invalid IP prefix format."
-    usage
-fi
-
-# Extract octets using regex capture groups
-OCT1=${BASH_REMATCH[1]}
-OCT2=${BASH_REMATCH[3]}
-OCT3=${BASH_REMATCH[5]}
-
-# Validate each octet range
-for oct in $OCT1 $OCT2 $OCT3; do
-    if [[ -n $oct ]] && ((oct < 0 || oct > 255)); then
-        echo "[!] Invalid octet value: $oct"
-        usage
-    fi
+# Parse command line arguments
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -j|--jobs)
+            shift
+            if [[ "$1" =~ ^[0-9]+$ ]] && [[ "$1" -gt 0 ]]; then
+                max_jobs="$1"
+            else
+                echo -e "${RED}ERROR: Invalid number of jobs: $1${NC}"
+                exit 1
+            fi
+            ;;
+        -t|--timeout)
+            shift
+            if [[ "$1" =~ ^[0-9]+(\.[0-9]+)?$ ]] && (( $(echo "$1 > 0" | bc -l) )); then
+                timeout="$1"
+            else
+                echo -e "${RED}ERROR: Invalid timeout value: $1${NC}"
+                exit 1
+            fi
+            ;;
+        -o|--output)
+            shift
+            output_file="$1"
+            ;;
+        -q|--quiet)
+            quiet=1
+            show_progress=0
+            ;;
+        --no-progress)
+            show_progress=0
+            ;;
+        -h|--help)
+            show_help
+            exit 0
+            ;;
+        -*)
+            echo -e "${RED}ERROR: Unknown option: $1${NC}"
+            show_help
+            exit 1
+            ;;
+        *)
+            if [[ -z "$prefix" ]]; then
+                prefix="$1"
+            else
+                echo -e "${RED}ERROR: Multiple prefixes specified${NC}"
+                exit 1
+            fi
+            ;;
+    esac
+    shift
 done
 
-# Define scanning ranges for 2nd and 3rd octets based on input
-if [[ -z $OCT2 ]]; then
-    # Only 1 octet provided; scan 2nd and 3rd octet from 0-255
-    RANGE2=$(seq 0 255)
-    RANGE3=$(seq 0 255)
-elif [[ -z $OCT3 ]]; then
-    # 2 octets provided; scan 3rd octet 0-255
-    RANGE2=$OCT2
-    RANGE3=$(seq 0 255)
-else
-    # 3 octets provided; fixed 2nd and 3rd octet, only scan 4th octet
-    RANGE2=$OCT2
-    RANGE3=$OCT3
+# Set default prefix if none provided
+if [[ -z "$prefix" ]]; then
+    prefix=$DEFAULT_PREFIX
+    if [[ $quiet -eq 0 ]]; then
+        echo -e "${YELLOW}WARNING: No prefix specified, using default: $prefix${NC}"
+    fi
 fi
 
-echo "[*] Starting subnet sweep on prefix: $PREFIX.x.x"
+# Utility functions
+log() {
+    local level="$1"
+    shift
+    local message="$*"
+    local timestamp=$(date '+%H:%M:%S')
+    
+    case "$level" in
+        "INFO")  echo -e "${BLUE}[$timestamp] INFO: $message${NC}" ;;
+        "SUCCESS") echo -e "${GREEN}[$timestamp] SUCCESS: $message${NC}" ;;
+        "WARNING") echo -e "${YELLOW}[$timestamp] WARNING: $message${NC}" ;;
+        "ERROR") echo -e "${RED}[$timestamp] ERROR: $message${NC}" ;;
+    esac
+}
 
-# Clear/create output file for live hosts
-> live-hosts.txt
+# Validate IP prefix format
+validate_prefix() {
+    local prefix="$1"
+    
+    # Check format: 1-3 octets, each 0-255
+    if [[ ! $prefix =~ ^([0-9]{1,3})(\.([0-9]{1,3})(\.([0-9]{1,3}))?)?$ ]]; then
+        return 1
+    fi
+    
+    # Extract octets using regex capture groups
+    local oct1=${BASH_REMATCH[1]}
+    local oct2=${BASH_REMATCH[3]}
+    local oct3=${BASH_REMATCH[5]}
+    
+    # Validate each octet range
+    for oct in $oct1 $oct2 $oct3; do
+        if [[ -n $oct ]] && ((oct < 0 || oct > 255)); then
+            return 1
+        fi
+    done
+    
+    return 0
+}
 
-# Maximum number of concurrent ping jobs
-MAX_JOBS=50
+# Check prerequisites
+check_prerequisites() {
+    if ! command -v ping &> /dev/null; then
+        log ERROR "ping command not found"
+        exit 1
+    fi
+    
+    if ! command -v bc &> /dev/null; then
+        log ERROR "bc command required for timeout validation"
+        exit 1
+    fi
+}
 
-# Loop through the determined ranges and ping hosts
-for second in ${RANGE2[@]}; do
-    for third in ${RANGE3[@]}; do
-        # The 4th octet always scanned from 1 to 254 (exclude .0 and .255)
-        for fourth in $(seq 1 254); do
-            IP="$OCT1.$second.$third.$fourth"
-            echo -ne "Scanning: $IP\r"
+# Calculate total IPs to scan
+calculate_scan_size() {
+    local prefix="$1"
+    local oct1=${BASH_REMATCH[1]}
+    local oct2=${BASH_REMATCH[3]}
+    local oct3=${BASH_REMATCH[5]}
+    
+    local range2_count=1
+    local range3_count=1
+    
+    if [[ -z $oct2 ]]; then
+        # 1 octet: scan 2nd and 3rd octets 0-255
+        range2_count=256
+        range3_count=256
+    elif [[ -z $oct3 ]]; then
+        # 2 octets: scan 3rd octet 0-255
+        range3_count=256
+    fi
+    
+    # 4th octet always 1-254 (254 addresses)
+    local total_ips=$((range2_count * range3_count * 254))
+    echo $total_ips
+}
 
-            # Ping once with 1 second timeout, if host replies add to live-hosts.txt
-            (ping -c 1 -W 1 "$IP" | grep -q "64 bytes" && echo "[+] Host Up: $IP" | tee -a live-hosts.txt) &
+# Ping a single host
+ping_host() {
+    local ip="$1"
+    local timeout="$2"
+    
+    if ping -c 1 -W "$timeout" "$ip" >/dev/null 2>&1; then
+        echo "$ip"
+        return 0
+    fi
+    return 1
+}
 
-            # Control concurrency by waiting when max jobs are running
-            while [ "$(jobs -r | wc -l)" -ge "$MAX_JOBS" ]; do
-                sleep 0.2
-                wait -n
+# Main scanning function
+scan_subnet() {
+    local prefix="$1"
+    local max_jobs="$2"
+    local timeout="$3"
+    local output_file="$4"
+    
+    # Extract octets
+    local oct1=${BASH_REMATCH[1]}
+    local oct2=${BASH_REMATCH[3]}
+    local oct3=${BASH_REMATCH[5]}
+    
+    # Define scanning ranges
+    local range2 range3
+    if [[ -z $oct2 ]]; then
+        # 1 octet: scan 2nd and 3rd octets 0-255
+        range2=$(seq 0 255)
+        range3=$(seq 0 255)
+    elif [[ -z $oct3 ]]; then
+        # 2 octets: scan 3rd octet 0-255
+        range2=$oct2
+        range3=$(seq 0 255)
+    else
+        # 3 octets: fixed 2nd and 3rd octet
+        range2=$oct2
+        range3=$oct3
+    fi
+    
+    # Calculate total IPs for progress tracking
+    local total_ips=$(calculate_scan_size "$prefix")
+    local scanned=0
+    local found=0
+    
+    # Clear/create output file
+    > "$output_file"
+    
+    log INFO "Starting subnet scan on prefix: $prefix.x.x"
+    log INFO "Total IPs to scan: $total_ips"
+    log INFO "Concurrent jobs: $max_jobs, Timeout: ${timeout}s"
+    
+    # Loop through ranges and ping hosts
+    for second in ${range2[@]}; do
+        for third in ${range3[@]}; do
+            # 4th octet: 1-254 (exclude .0 and .255)
+            for fourth in $(seq 1 254); do
+                local ip="$oct1.$second.$third.$fourth"
+                ((scanned++))
+                
+                # Show progress
+                if [[ $show_progress -eq 1 ]] && ((scanned % 100 == 0)); then
+                    local progress=$((scanned * 100 / total_ips))
+                    echo -ne "Progress: $progress% ($scanned/$total_ips) - Current: $ip\r"
+                fi
+                
+                # Ping host in background
+                (ping_host "$ip" "$timeout" && echo "$ip" >> "$output_file" && ((found++))) &
+                
+                # Control concurrency
+                while [[ $(jobs -r | wc -l) -ge $max_jobs ]]; do
+                    sleep 0.1
+                    wait -n 2>/dev/null || true
+                done
             done
         done
     done
-done
+    
+    # Wait for remaining jobs
+    wait
+    
+    # Final progress update
+    if [[ $show_progress -eq 1 ]]; then
+        echo -e "\n"
+    fi
+    
+    return 0
+}
 
-# Wait for any remaining ping jobs to finish
-wait
+# Main execution
+main() {
+    check_prerequisites
+    
+    if ! validate_prefix "$prefix"; then
+        log ERROR "Invalid IP prefix format: $prefix"
+        echo "Valid format: 1-3 octets (e.g., 172, 172.16, 172.16.2)"
+        exit 1
+    fi
+    
+    # Re-validate to get regex matches for scanning
+    [[ $prefix =~ ^([0-9]{1,3})(\.([0-9]{1,3})(\.([0-9]{1,3}))?)?$ ]]
+    
+    # Start scanning
+    local start_time=$(date +%s)
+    scan_subnet "$prefix" "$max_jobs" "$timeout" "$output_file"
+    local end_time=$(date +%s)
+    local duration=$((end_time - start_time))
+    
+    # Results summary
+    local live_hosts=0
+    if [[ -f "$output_file" ]]; then
+        live_hosts=$(wc -l < "$output_file")
+    fi
+    
+    log SUCCESS "Scan completed in ${duration}s"
+    log INFO "Live hosts found: $live_hosts"
+    log INFO "Results saved to: $output_file"
+    
+    if [[ $live_hosts -gt 0 ]] && [[ $quiet -eq 0 ]]; then
+        echo
+        log INFO "Live hosts preview:"
+        head -10 "$output_file" | while read -r host; do
+            echo -e "  ${GREEN}$host${NC}"
+        done
+        if [[ $live_hosts -gt 10 ]]; then
+            echo -e "  ${BLUE}... and $((live_hosts - 10)) more${NC}"
+        fi
+    fi
+}
 
-echo -e "\n[*] Scan complete. Live hosts written to 'live-hosts.txt'"
+main "$@"
