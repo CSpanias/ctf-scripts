@@ -150,9 +150,11 @@ check_prerequisites() {
 # Validate IP address or hostname and resolve to IP
 validate_and_resolve_target() {
     local target="$1"
+    echo "DEBUG: validate_and_resolve_target called with: '$target'" >&2
     
     # Check if it's a numeric IP address
     if [[ "$target" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
+        echo "DEBUG: Target is numeric IP" >&2
         IFS='.' read -r -a octets <<< "$target"
         for octet in "${octets[@]}"; do
             if [[ ! "$octet" =~ ^[0-9]+$ ]] || [[ "$octet" -lt 0 ]] || [[ "$octet" -gt 255 ]]; then
@@ -163,11 +165,15 @@ validate_and_resolve_target() {
         return 0
     fi
     
+    echo "DEBUG: Target is hostname, trying resolution methods..." >&2
+    
     # Try to resolve hostname to IP address using Linux methods
     
     # Method 1: getent hosts (reads /etc/hosts file) - PRIORITY
     if command -v getent &> /dev/null; then
+        echo "DEBUG: Trying getent hosts..." >&2
         local resolved_ip=$(timeout 5 getent hosts "$target" 2>/dev/null | awk '{print $1}')
+        echo "DEBUG: getent hosts result: '$resolved_ip'" >&2
         if [[ -n "$resolved_ip" ]]; then
             echo "$resolved_ip"
             return 0
@@ -176,7 +182,9 @@ validate_and_resolve_target() {
     
     # Method 2: nslookup (with timeout)
     if command -v nslookup &> /dev/null; then
+        echo "DEBUG: Trying nslookup..." >&2
         local resolved_ip=$(timeout 5 nslookup "$target" 2>/dev/null | grep -A1 "Name:" | tail -1 | awk '{print $2}')
+        echo "DEBUG: nslookup result: '$resolved_ip'" >&2
         if [[ -n "$resolved_ip" && "$resolved_ip" != "NXDOMAIN" ]]; then
             echo "$resolved_ip"
             return 0
@@ -185,13 +193,16 @@ validate_and_resolve_target() {
     
     # Method 3: host command (with timeout)
     if command -v host &> /dev/null; then
+        echo "DEBUG: Trying host command..." >&2
         local resolved_ip=$(timeout 5 host "$target" 2>/dev/null | grep "has address" | head -1 | awk '{print $NF}')
+        echo "DEBUG: host command result: '$resolved_ip'" >&2
         if [[ -n "$resolved_ip" ]]; then
             echo "$resolved_ip"
             return 0
         fi
     fi
     
+    echo "DEBUG: All resolution methods failed" >&2
     return 1
 }
 
@@ -282,10 +293,14 @@ main() {
     local processed_targets=""
     local processed_ips=""
     
+    echo "DEBUG: Starting target processing..."
     while IFS= read -r target; do
+        echo "DEBUG: Processing target: '$target'"
         [[ -z "$target" ]] && continue
         
+        echo "DEBUG: Calling validate_and_resolve_target for '$target'"
         local resolved_ip=$(validate_and_resolve_target "$target")
+        echo "DEBUG: validate_and_resolve_target returned: '$resolved_ip' (exit code: $?)"
         if [[ $? -eq 0 ]]; then
             processed_targets="$processed_targets $target"
             processed_ips="$processed_ips $resolved_ip"
@@ -296,6 +311,7 @@ main() {
             log WARNING "Invalid target or cannot resolve: $target (skipping)"
         fi
     done <<< "$target_list"
+    echo "DEBUG: Finished target processing"
     
     # Check if we have any targets
     if [[ -z "$processed_targets" ]]; then
