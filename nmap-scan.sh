@@ -270,92 +270,102 @@ scan_single_host() {
 main() {
     check_prerequisites
     
-    local ips_to_scan=()
+    # Simple approach: process one target at a time
+    local target_list=""
     if [[ -n "$ip_list" ]]; then
-        mapfile -t ips_to_scan < <(grep -Ev '^\s*($|#)' "$ip_list")
+        target_list=$(grep -Ev '^\s*($|#)' "$ip_list")
     else
-        ips_to_scan=("$IP")
+        target_list="$IP"
     fi
     
-    local valid_targets=()
-    local target_to_ip=()
+    # Process each target individually
+    local processed_targets=""
+    local processed_ips=""
     
-    for target in "${ips_to_scan[@]}"; do
+    while IFS= read -r target; do
+        [[ -z "$target" ]] && continue
+        
         local resolved_ip=$(validate_and_resolve_target "$target")
         if [[ $? -eq 0 ]]; then
-            valid_targets+=("$target")
-            # Use a different approach to avoid arithmetic interpretation
-            eval "target_to_ip_${target//[^a-zA-Z0-9_]/_}=\"$resolved_ip\""
+            processed_targets="$processed_targets $target"
+            processed_ips="$processed_ips $resolved_ip"
             if [[ "$target" != "$resolved_ip" ]]; then
                 log INFO "Resolved $target to $resolved_ip"
             fi
         else
             log WARNING "Invalid target or cannot resolve: $target (skipping)"
         fi
-    done
+    done <<< "$target_list"
     
-    if [[ ${#valid_targets[@]} -eq 0 ]]; then
+    # Check if we have any targets
+    if [[ -z "$processed_targets" ]]; then
         log ERROR "No valid targets to scan"
         exit 1
     fi
     
-    log INFO "Starting scan of ${#valid_targets[@]} target(s) with $concurrent concurrent jobs"
+    # Count targets (simple approach)
+    local target_count=0
+    for t in $processed_targets; do
+        target_count=$((target_count + 1))
+    done
+    
+    log INFO "Starting scan of $target_count target(s) with $concurrent concurrent jobs"
     
     mkdir -p "$output_dir"
     
     local timestamp=$(date +"%Y%m%d_%H%M%S")
-    local pids=()
+    local pids=""
     local scan_completed=0
     local scan_failed=0
     
-    # Debug: Print initial values
-    echo "DEBUG: scan_completed=$scan_completed, scan_failed=$scan_failed, concurrent=$concurrent"
+    # Convert to arrays for processing
+    local targets=($processed_targets)
+    local ips=($processed_ips)
     
-    for target in "${valid_targets[@]}"; do
-        local resolved_ip=""
-        # Get the resolved IP using the new variable naming approach
-        local var_name="target_to_ip_${target//[^a-zA-Z0-9_]/_}"
-        if [[ -n "${!var_name:-}" ]]; then
-            resolved_ip="${!var_name}"
-        else
-            log ERROR "Could not resolve IP for target: $target"
-            continue
-        fi
+    for i in $(seq 0 $((target_count - 1))); do
+        local target="${targets[$i]}"
+        local resolved_ip="${ips[$i]}"
         local scan_dir="$output_dir/$target"
         
-        local scan_current_pids=${#pids[@]}
-        echo "DEBUG: scan_current_pids=$scan_current_pids, concurrent=$concurrent"
-        while [[ $scan_current_pids -ge $concurrent ]]; do
-            for pid_idx in "${!pids[@]}"; do
-                if ! kill -0 "${pids[$pid_idx]}" 2>/dev/null; then
-                    wait "${pids[$pid_idx]}"
+        # Simple concurrency control
+        local current_pid_count=0
+        for pid in $pids; do
+            if kill -0 "$pid" 2>/dev/null; then
+                current_pid_count=$((current_pid_count + 1))
+            fi
+        done
+        
+        while [[ $current_pid_count -ge $concurrent ]]; do
+            sleep 1
+            current_pid_count=0
+            local new_pids=""
+            for pid in $pids; do
+                if kill -0 "$pid" 2>/dev/null; then
+                    new_pids="$new_pids $pid"
+                    current_pid_count=$((current_pid_count + 1))
+                else
+                    wait "$pid"
                     if [[ $? -eq 0 ]]; then
-                        echo "DEBUG: Before incrementing scan_completed=$scan_completed"
                         scan_completed=$((scan_completed + 1))
-                        echo "DEBUG: After incrementing scan_completed=$scan_completed"
                     else
-                        echo "DEBUG: Before incrementing scan_failed=$scan_failed"
                         scan_failed=$((scan_failed + 1))
-                        echo "DEBUG: After incrementing scan_failed=$scan_failed"
                     fi
-                    unset "pids[$pid_idx]"
                 fi
             done
-            pids=("${pids[@]}")
-            scan_current_pids=${#pids[@]}
-            echo "DEBUG: Updated scan_current_pids=$scan_current_pids"
-            sleep 1
+            pids="$new_pids"
         done
         
         scan_single_host "$resolved_ip" "$scan_dir" "$timestamp" &
-        pids+=($!)
+        local new_pid=$!
+        pids="$pids $new_pid"
         
         if [[ $quiet -eq 0 ]]; then
-            log INFO "Started scan for $target ($resolved_ip) (PID: $!)"
+            log INFO "Started scan for $target ($resolved_ip) (PID: $new_pid)"
         fi
     done
     
-    for pid in "${pids[@]}"; do
+    # Wait for remaining processes
+    for pid in $pids; do
         wait "$pid"
         if [[ $? -eq 0 ]]; then
             scan_completed=$((scan_completed + 1))
@@ -373,7 +383,7 @@ main() {
     if [[ $scan_completed -gt 0 ]]; then
         echo
         log INFO "Quick results preview:"
-        for target in "${valid_targets[@]}"; do
+        for target in $processed_targets; do
             local scan_dir="$output_dir/$target"
             if [[ -d "$scan_dir" ]]; then
                 local tcp_file=$(find "$scan_dir" -name "*aggressive_scan_$timestamp.nmap" -o -name "*fallback_scan_$timestamp.nmap" | head -1)
