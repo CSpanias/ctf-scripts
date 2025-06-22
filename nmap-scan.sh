@@ -56,6 +56,9 @@ EXAMPLES:
     $0 charlie
     $0 -iL targets.txt -j 5 --no-udp
     $0 -iL targets.txt -j 3 -t 1800 --timing -T3
+
+NOTE: This script requires sudo privileges for full scan capabilities.
+      Run with: sudo $0 <target>
 EOF
 }
 
@@ -142,8 +145,20 @@ check_prerequisites() {
         exit 1
     fi
     
-    if ! sudo -n true 2>/dev/null; then
-        log WARNING "sudo privileges required for full scan capabilities"
+    # Check if we're running as root or have sudo privileges
+    if [[ $EUID -eq 0 ]]; then
+        log SUCCESS "Running as root - full scan capabilities available"
+        return 0
+    fi
+    
+    # Test sudo privileges
+    if sudo -n true 2>/dev/null; then
+        log SUCCESS "Sudo privileges confirmed - full scan capabilities available"
+        return 0
+    else
+        log ERROR "This script requires sudo privileges for full scan capabilities"
+        log ERROR "Please run with: sudo $0 $*"
+        exit 1
     fi
 }
 
@@ -221,7 +236,7 @@ scan_single_host() {
     log SUCCESS "[$ip] Host is up"
     
     log INFO "[$ip] Starting full TCP port scan..."
-    if ! timeout "$timeout" sudo nmap -Pn "$timing" -p- --min-rate="$MIN_RATE" --max-rate="$MAX_RATE" \
+    if ! timeout "$timeout" nmap -Pn "$timing" -p- --min-rate="$MIN_RATE" --max-rate="$MAX_RATE" \
         -oA "$scan_dir/initial_port-scan_$timestamp" "$ip" > /dev/null 2>&1; then
         log ERROR "[$ip] TCP port scan failed or timed out"
         return 1
@@ -240,12 +255,12 @@ scan_single_host() {
         log SUCCESS "[$ip] Open TCP ports: $open_ports"
         
         log INFO "[$ip] Running aggressive scan on open ports..."
-        if timeout "$timeout" sudo nmap -Pn "$timing" -A -p "$open_ports" \
+        if timeout "$timeout" nmap -Pn "$timing" -A -p "$open_ports" \
             -oA "$scan_dir/aggressive_scan_$timestamp" "$ip" > /dev/null 2>&1; then
             log SUCCESS "[$ip] Aggressive TCP scan completed: cat $scan_dir/aggressive_scan_$timestamp.nmap"
         else
             log WARNING "[$ip] Aggressive scan failed, trying fallback..."
-            if timeout "$timeout" sudo nmap -Pn "$timing" -sC -sV -p "$open_ports" \
+            if timeout "$timeout" nmap -Pn "$timing" -sC -sV -p "$open_ports" \
                 -oA "$scan_dir/fallback_scan_$timestamp" "$ip" > /dev/null 2>&1; then
                 log SUCCESS "[$ip] Fallback scan completed: cat $scan_dir/fallback_scan_$timestamp.nmap"
             else
@@ -256,7 +271,7 @@ scan_single_host() {
     
     if [[ $no_udp -eq 0 ]]; then
         log INFO "[$ip] Starting initial UDP scan (top 100 ports)..."
-        if timeout "$timeout" sudo nmap -Pn -sU -sV --top-ports 100 "$timing" \
+        if timeout "$timeout" nmap -Pn -sU -sV --top-ports 100 "$timing" \
             -oA "$scan_dir/udp_scan_$timestamp" "$ip" > /dev/null 2>&1; then
             log SUCCESS "[$ip] Initial UDP scan completed: cat $scan_dir/udp_scan_$timestamp.nmap"
             
@@ -268,7 +283,7 @@ scan_single_host() {
                     log SUCCESS "[$ip] Open UDP ports: $udp_ports"
                     
                     log INFO "[$ip] Running aggressive UDP scan on open ports..."
-                    if timeout "$timeout" sudo nmap -Pn -sU -sV -A -p "$udp_ports" "$timing" \
+                    if timeout "$timeout" nmap -Pn -sU -sV -A -p "$udp_ports" "$timing" \
                         -oA "$scan_dir/udp_aggressive_scan_$timestamp" "$ip" > /dev/null 2>&1; then
                         log SUCCESS "[$ip] Aggressive UDP scan completed: cat $scan_dir/udp_aggressive_scan_$timestamp.nmap"
                     else
