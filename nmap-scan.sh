@@ -155,7 +155,7 @@ validate_and_resolve_target() {
     if [[ "$target" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
         IFS='.' read -r -a octets <<< "$target"
         for octet in "${octets[@]}"; do
-            if [[ "$octet" -lt 0 || "$octet" -gt 255 ]]; then
+            if [[ ! "$octet" =~ ^[0-9]+$ ]] || [[ "$octet" -lt 0 ]] || [[ "$octet" -gt 255 ]]; then
                 return 1
             fi
         done
@@ -317,7 +317,8 @@ main() {
         fi
         local scan_dir="$output_dir/$target"
         
-        while [[ ${#pids[@]} -ge $concurrent ]]; do
+        local current_pids=${#pids[@]}
+        while [[ $current_pids -ge $concurrent ]]; do
             for i in "${!pids[@]}"; do
                 if ! kill -0 "${pids[$i]}" 2>/dev/null; then
                     wait "${pids[$i]}"
@@ -330,6 +331,7 @@ main() {
                 fi
             done
             pids=("${pids[@]}")
+            current_pids=${#pids[@]}
             sleep 1
         done
         
