@@ -3,7 +3,7 @@
 # Nmap Scanner for CTF/Pentesting
 # Optimized version with concurrency, error handling, and resource management
 
-set -euo pipefail
+set -eo pipefail  # Remove 'u' to allow unbound variables
 
 # Configuration
 MAX_CONCURRENT_SCANS=3
@@ -116,7 +116,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "$ip_list" && -z "$IP" ]]; then
-    echo -e "${RED}ERROR: Missing IP address or input list!${NC}"
+    echo -e "${RED}ERROR: Missing target or input list!${NC}"
     show_help
     exit 1
 fi
@@ -308,7 +308,13 @@ main() {
     local failed=0
     
     for target in "${valid_targets[@]}"; do
-        local resolved_ip="${target_to_ip[$target]}"
+        local resolved_ip=""
+        if [[ -n "${target_to_ip[$target]:-}" ]]; then
+            resolved_ip="${target_to_ip[$target]}"
+        else
+            log ERROR "Could not resolve IP for target: $target"
+            continue
+        fi
         local scan_dir="$output_dir/$target"
         
         while [[ ${#pids[@]} -ge $concurrent ]]; do
@@ -365,4 +371,4 @@ main() {
     fi
 }
 
-main "$@"
+main "$@" 
