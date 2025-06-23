@@ -1,7 +1,44 @@
 #!/bin/bash
 
-# Nmap Scanner for CTF/Pentesting
-# Optimized version with concurrency, error handling, and resource management
+# -----------------------------------------------------------------------------
+# NMAP-SCAN: Optimized Nmap Scanner for CTF/Pentesting
+#
+# Author: x7331
+# Version: 2.0
+#
+# Description:
+#   Fast, concurrent, and robust Nmap scanning for CTFs, labs, and pentesting.
+#   Supports hostnames, IPs, input lists, and both TCP/UDP scans with output
+#   management and error handling. Designed for quick recon and automation.
+#
+# Usage:
+#   ./nmap-scan.sh [OPTIONS] <TARGET>
+#   ./nmap-scan.sh [OPTIONS] -iL <target-list-file>
+#
+#   TARGET can be:
+#     - IP address (e.g., 192.168.1.1)
+#     - Hostname (e.g., charlie, server.local)
+#     - FQDN (e.g., www.example.com)
+#
+#   OPTIONS:
+#     -iL <file>          Input list of targets (IPs or hostnames)
+#     --no-udp            Skip UDP scanning
+#     -j, --jobs <num>    Maximum concurrent scans (default: 3)
+#     -q, --quiet         Reduce output verbosity
+#     -t, --timeout <sec> Scan timeout in seconds (default: 3600)
+#     --timing <level>    Nmap timing template (default: -T4)
+#     -o, --output <dir>  Output directory (default: scans)
+#     -h, --help          Show this help message
+#
+#   EXAMPLES:
+#     ./nmap-scan.sh 10.10.10.10
+#     ./nmap-scan.sh charlie
+#     ./nmap-scan.sh -iL targets.txt -j 5 --no-udp
+#     ./nmap-scan.sh -iL targets.txt -j 3 -t 1800 --timing -T3
+#
+#   NOTE: This script requires sudo privileges for full scan capabilities.
+#         Run with: sudo ./nmap-scan.sh <target>
+# -----------------------------------------------------------------------------
 
 set -eo pipefail  # Remove 'u' to allow unbound variables
 
@@ -315,9 +352,9 @@ main() {
     fi
     
     # Process each target individually
-    local processed_targets=""
-    local processed_ips=""
-    
+    local targets=()
+    local ips=()
+
     echo "DEBUG: Starting target processing..."
     while IFS= read -r target; do
         echo "DEBUG: Processing target: '$target'"
@@ -327,8 +364,8 @@ main() {
         local resolved_ip=$(validate_and_resolve_target "$target")
         echo "DEBUG: validate_and_resolve_target returned: '$resolved_ip' (exit code: $?)"
         if [[ $? -eq 0 ]]; then
-            processed_targets="$processed_targets $target"
-            processed_ips="$processed_ips $resolved_ip"
+            targets+=("$target")
+            ips+=("$resolved_ip")
             if [[ "$target" != "$resolved_ip" ]]; then
                 log INFO "Resolved $target to $resolved_ip"
             fi
@@ -339,16 +376,11 @@ main() {
     echo "DEBUG: Finished target processing"
     
     # Check if we have any targets
-    if [[ -z "$processed_targets" ]]; then
+    local target_count="${#targets[@]}"
+    if [[ $target_count -eq 0 ]]; then
         log ERROR "No valid targets to scan"
         exit 1
     fi
-    
-    # Count targets (simple approach)
-    local target_count=0
-    for t in $processed_targets; do
-        target_count=$((target_count + 1))
-    done
     
     log INFO "Starting scan of $target_count target(s) with $concurrent concurrent jobs"
     
@@ -359,11 +391,7 @@ main() {
     local scan_completed=0
     local scan_failed=0
     
-    # Convert to arrays for processing
-    local targets=($processed_targets)
-    local ips=($processed_ips)
-    
-    for i in $(seq 0 $((target_count - 1))); do
+    for ((i=0; i<target_count; i++)); do
         local target="${targets[$i]}"
         local resolved_ip="${ips[$i]}"
         local scan_dir="$output_dir/$target"
@@ -424,7 +452,7 @@ main() {
     if [[ $scan_completed -gt 0 ]]; then
         echo
         log INFO "Quick results preview:"
-        for target in $processed_targets; do
+        for target in "${targets[@]}"; do
             local scan_dir="$output_dir/$target"
             if [[ -d "$scan_dir" ]]; then
                 local tcp_file=$(find "$scan_dir" -name "*aggressive_scan_$timestamp.nmap" -o -name "*fallback_scan_$timestamp.nmap" | head -1)

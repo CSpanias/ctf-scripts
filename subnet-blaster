@@ -1,18 +1,36 @@
 #!/bin/bash
+
+# -----------------------------------------------------------------------------
+# SUBNET-BLASTER: Fast Subnet IP Scanner
 #
-# subnet-blaster - A subnet IP scanner supporting 1, 2, or 3 octet prefixes.
+# Author: x7331 (original by Jtgit4)
+# Version: 2.0
 #
-# Original script by https://github.com/Jtgit4
-# Enhanced by ChatGPT to support variable octet prefixes and added comments.
+# Description:
+#   Quickly scan a subnet for live hosts using concurrent pings. Supports 1, 2,
+#   or 3 octet prefixes (e.g., 10, 10.0, 10.0.1) and outputs live hosts to file.
+#   Includes color output, progress, and robust error handling.
 #
 # Usage:
-#   ./subnet-blaster [IP prefix]
+#   ./subnet-blaster [OPTIONS] [IP_PREFIX]
 #
-# Examples:
-#   ./subnet-blaster 172          # scans 172.0.0.1-254 to 172.255.255.254
-#   ./subnet-blaster 172.16       # scans 172.16.0.1-254 to 172.16.255.254
-#   ./subnet-blaster 172.16.2     # scans 172.16.2.1-254 only
+#   OPTIONS:
+#     -j, --jobs <num>     Maximum concurrent ping jobs (default: 50)
+#     -t, --timeout <sec>  Ping timeout in seconds (default: 1)
+#     -o, --output <file>  Output file for live hosts (default: live-hosts.txt)
+#     -q, --quiet          Reduce output verbosity
+#     --no-progress        Disable progress display
+#     -h, --help           Show this help message
 #
+#   EXAMPLES:
+#     ./subnet-blaster 172                # Scan 172.0.0.1-254 to 172.255.255.254
+#     ./subnet-blaster 172.16             # Scan 172.16.0.1-254 to 172.16.255.254
+#     ./subnet-blaster 172.16.2           # Scan 172.16.2.1-254 only
+#     ./subnet-blaster -j 100 -t 2 10.0.0 # Scan with 100 jobs, 2s timeout
+#     ./subnet-blaster -q -o results.txt 192.168.1 # Quiet mode, custom output
+#
+#   DEFAULT: If no prefix provided, scans 192.168.0.1-254 to 192.168.255.254
+# -----------------------------------------------------------------------------
 
 set -euo pipefail
 
