@@ -233,11 +233,10 @@ chmod +x *.sh
 - Maintain organized output directories
 - Use appropriate timeouts for network conditions
 
-## License
-
-MIT License - free to use, modify, and distribute.
-
 ## Credits
 
 - **subnet-blaster**: Original script by [Jtgit4](https://github.com/Jtgit4), enhanced and optimized
 - **nmap-scan.sh**: Optimized for CTF and pentesting workflows
+
+## License
+MIT License - free to use, modify, and distribute.
