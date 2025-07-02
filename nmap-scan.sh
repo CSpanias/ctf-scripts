@@ -65,6 +65,7 @@ quiet=0
 timeout=$SCAN_TIMEOUT
 timing=$DEFAULT_TIMING
 output_dir="scans"
+debug=0
 
 show_help() {
     cat << EOF
@@ -142,6 +143,9 @@ while [[ $# -gt 0 ]]; do
             shift
             output_dir="$1"
             ;;
+        --debug)
+            debug=1
+            ;;
         -h|--help)
             show_help
             exit 0
@@ -199,14 +203,21 @@ check_prerequisites() {
     fi
 }
 
+# Debug print function
+_debug() {
+    if [[ $debug -eq 1 ]]; then
+        echo "DEBUG: $*" >&2
+    fi
+}
+
 # Validate IP address or hostname and resolve to IP
 validate_and_resolve_target() {
     local target="$1"
-    echo "DEBUG: validate_and_resolve_target called with: '$target'" >&2
+    _debug "validate_and_resolve_target called with: '$target'"
     
     # Check if it's a numeric IP address
     if [[ "$target" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
-        echo "DEBUG: Target is numeric IP" >&2
+        _debug "Target is numeric IP"
         IFS='.' read -r -a octets <<< "$target"
         for octet in "${octets[@]}"; do
             if [[ ! "$octet" =~ ^[0-9]+$ ]] || [[ "$octet" -lt 0 ]] || [[ "$octet" -gt 255 ]]; then
@@ -217,15 +228,15 @@ validate_and_resolve_target() {
         return 0
     fi
     
-    echo "DEBUG: Target is hostname, trying resolution methods..." >&2
+    _debug "Target is hostname, trying resolution methods..."
     
     # Try to resolve hostname to IP address using Linux methods
     
     # Method 1: getent hosts (reads /etc/hosts file) - PRIORITY
     if command -v getent &> /dev/null; then
-        echo "DEBUG: Trying getent hosts..." >&2
+        _debug "Trying getent hosts..."
         local resolved_ip=$(timeout 5 getent hosts "$target" 2>/dev/null | awk '{print $1}')
-        echo "DEBUG: getent hosts result: '$resolved_ip'" >&2
+        _debug "getent hosts result: '$resolved_ip'"
         if [[ -n "$resolved_ip" ]]; then
             echo "$resolved_ip"
             return 0
@@ -234,9 +245,9 @@ validate_and_resolve_target() {
     
     # Method 2: nslookup (with timeout)
     if command -v nslookup &> /dev/null; then
-        echo "DEBUG: Trying nslookup..." >&2
+        _debug "Trying nslookup..."
         local resolved_ip=$(timeout 5 nslookup "$target" 2>/dev/null | grep -A1 "Name:" | tail -1 | awk '{print $2}')
-        echo "DEBUG: nslookup result: '$resolved_ip'" >&2
+        _debug "nslookup result: '$resolved_ip'"
         if [[ -n "$resolved_ip" && "$resolved_ip" != "NXDOMAIN" ]]; then
             echo "$resolved_ip"
             return 0
@@ -245,16 +256,16 @@ validate_and_resolve_target() {
     
     # Method 3: host command (with timeout)
     if command -v host &> /dev/null; then
-        echo "DEBUG: Trying host command..." >&2
+        _debug "Trying host command..."
         local resolved_ip=$(timeout 5 host "$target" 2>/dev/null | grep "has address" | head -1 | awk '{print $NF}')
-        echo "DEBUG: host command result: '$resolved_ip'" >&2
+        _debug "host command result: '$resolved_ip'"
         if [[ -n "$resolved_ip" ]]; then
             echo "$resolved_ip"
             return 0
         fi
     fi
     
-    echo "DEBUG: All resolution methods failed" >&2
+    _debug "All resolution methods failed"
     return 1
 }
 
@@ -355,14 +366,14 @@ main() {
     local targets=()
     local ips=()
 
-    echo "DEBUG: Starting target processing..."
+    _debug "Starting target processing..."
     while IFS= read -r target; do
-        echo "DEBUG: Processing target: '$target'"
+        _debug "Processing target: '$target'"
         [[ -z "$target" ]] && continue
         
-        echo "DEBUG: Calling validate_and_resolve_target for '$target'"
+        _debug "Calling validate_and_resolve_target for '$target'"
         local resolved_ip=$(validate_and_resolve_target "$target")
-        echo "DEBUG: validate_and_resolve_target returned: '$resolved_ip' (exit code: $?)"
+        _debug "validate_and_resolve_target returned: '$resolved_ip' (exit code: $?)"
         if [[ $? -eq 0 ]]; then
             targets+=("$target")
             ips+=("$resolved_ip")
@@ -373,7 +384,7 @@ main() {
             log WARNING "Invalid target or cannot resolve: $target (skipping)"
         fi
     done <<< "$target_list"
-    echo "DEBUG: Finished target processing"
+    _debug "Finished target processing"
     
     # Check if we have any targets
     local target_count="${#targets[@]}"
