@@ -287,15 +287,15 @@ scan_single_host() {
     
     log INFO "[$ip] Starting full TCP port scan..."
     if ! timeout "$timeout" nmap -Pn "$timing" -p- --min-rate="$MIN_RATE" --max-rate="$MAX_RATE" \
-        -oA "$scan_dir/initial_port-scan_$timestamp" "$ip" > /dev/null 2>&1; then
+        -oA "$scan_dir/tcp_initial_scan_$timestamp" "$ip" > /dev/null 2>&1; then
         log ERROR "[$ip] TCP port scan failed or timed out"
         return 1
     fi
     log SUCCESS "[$ip] Initial TCP scan complete"
     
     local open_ports=""
-    if [[ -f "$scan_dir/initial_port-scan_$timestamp.nmap" ]]; then
-        open_ports=$(grep -E '^[0-9]+/tcp.*open' "$scan_dir/initial_port-scan_$timestamp.nmap" \
+    if [[ -f "$scan_dir/tcp_initial_scan_$timestamp.nmap" ]]; then
+        open_ports=$(grep -E '^[0-9]+/tcp.*open' "$scan_dir/tcp_initial_scan_$timestamp.nmap" \
             | cut -d'/' -f1 | paste -sd, -)
     fi
     
@@ -306,13 +306,13 @@ scan_single_host() {
         
         log INFO "[$ip] Running aggressive TCP scan on open ports..."
         if timeout "$timeout" nmap -Pn "$timing" -A -p "$open_ports" \
-            -oA "$scan_dir/aggressive_scan_$timestamp" "$ip" > /dev/null 2>&1; then
-            log SUCCESS "[$ip] Aggressive TCP scan completed: cat $scan_dir/aggressive_scan_$timestamp.nmap"
+            -oA "$scan_dir/tcp_aggressive_scan_$timestamp" "$ip" > /dev/null 2>&1; then
+            log SUCCESS "[$ip] Aggressive TCP scan completed: cat $scan_dir/tcp_aggressive_scan_$timestamp.nmap"
         else
             log WARNING "[$ip] Aggressive scan failed, trying fallback..."
             if timeout "$timeout" nmap -Pn "$timing" -sC -sV -p "$open_ports" \
-                -oA "$scan_dir/fallback_scan_$timestamp" "$ip" > /dev/null 2>&1; then
-                log SUCCESS "[$ip] Fallback scan completed: cat $scan_dir/fallback_scan_$timestamp.nmap"
+                -oA "$scan_dir/tcp_fallback_scan_$timestamp" "$ip" > /dev/null 2>&1; then
+                log SUCCESS "[$ip] Fallback scan completed: cat $scan_dir/tcp_fallback_scan_$timestamp.nmap"
             else
                 log ERROR "[$ip] Both aggressive and fallback scans failed"
             fi
@@ -468,7 +468,7 @@ main() {
         for target in "${targets[@]}"; do
             local scan_dir="$output_dir/$target"
             if [[ -d "$scan_dir" ]]; then
-                local tcp_file=$(find "$scan_dir" -name "*aggressive_scan_$timestamp.nmap" -o -name "*fallback_scan_$timestamp.nmap" | head -1)
+                local tcp_file=$(find "$scan_dir" -name "*tcp_aggressive_scan_$timestamp.nmap" -o -name "*tcp_fallback_scan_$timestamp.nmap" | head -1)
                 local udp_file=$(find "$scan_dir" -name "*udp_scan_$timestamp.nmap" | head -1)
                 local tcp_count=0
                 local udp_count=0
