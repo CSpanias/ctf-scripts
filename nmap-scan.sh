@@ -28,13 +28,14 @@
 #     -t, --timeout <sec> Scan timeout in seconds (default: 3600)
 #     --timing <level>    Nmap timing template (default: -T4)
 #     -o, --output <dir>  Output directory (default: scans)
+#     --debug             Enable debug output
 #     -h, --help          Show this help message
 #
 #   EXAMPLES:
 #     ./nmap-scan.sh 10.10.10.10
 #     ./nmap-scan.sh charlie
 #     ./nmap-scan.sh -iL targets.txt -j 5 --no-udp
-#     ./nmap-scan.sh -iL targets.txt -j 3 -t 1800 --timing -T3
+#     ./nmap-scan.sh -iL targets.txt -j 3 -t 1800 --timing -T3 --debug
 #
 #   NOTE: This script requires sudo privileges for full scan capabilities.
 #         Run with: sudo ./nmap-scan.sh <target>
@@ -87,13 +88,14 @@ OPTIONS:
     -t, --timeout <sec> Scan timeout in seconds (default: $SCAN_TIMEOUT)
     --timing <level>    Nmap timing template (default: $DEFAULT_TIMING)
     -o, --output <dir>  Output directory (default: $output_dir)
+    --debug             Enable debug output
     -h, --help          Show this help message
 
 EXAMPLES:
     $0 10.10.10.10
     $0 charlie
     $0 -iL targets.txt -j 5 --no-udp
-    $0 -iL targets.txt -j 3 -t 1800 --timing -T3
+    $0 -iL targets.txt -j 3 -t 1800 --timing -T3 --debug
 
 NOTE: This script requires sudo privileges for full scan capabilities.
       Run with: sudo $0 <target>
