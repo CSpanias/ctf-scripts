@@ -304,7 +304,7 @@ scan_single_host() {
     else
         log SUCCESS "[$ip] Open TCP ports: $open_ports"
         
-        log INFO "[$ip] Running aggressive scan on open ports..."
+        log INFO "[$ip] Running aggressive TCP scan on open ports..."
         if timeout "$timeout" nmap -Pn "$timing" -A -p "$open_ports" \
             -oA "$scan_dir/aggressive_scan_$timestamp" "$ip" > /dev/null 2>&1; then
             log SUCCESS "[$ip] Aggressive TCP scan completed: cat $scan_dir/aggressive_scan_$timestamp.nmap"
