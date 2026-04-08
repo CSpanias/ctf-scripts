@@ -18,7 +18,7 @@ echo -e "${GREEN}========================================${NC}\n"
 # Install UV
 echo -e "${BLUE}[*] Installing UV package manager${NC}"
 curl -LsSf https://astral.sh/uv/install.sh | sh
-source $HOME/.cargo/env
+export PATH="$HOME/.local/bin:$PATH"
 uv cache clean
 echo -e "${GREEN}[✓] UV installed successfully${NC}\n"
 
