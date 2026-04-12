@@ -1,89 +1,206 @@
 #!/bin/bash
 
-# HTB Cybernetics Lab Setup Script (CAPE prep)
+# --- Kali Linux Custom Setup Script ---
 
-set -e  # Exit on error
+# Description: This script performs a fresh setup and installs tools
+#              for a minimal Kali Linux environment. It accepts command-line
+#              arguments to specify which sets of tools to install.
+#
+# Usage:
+#   ./kali-setup.sh --core      : Installs only the core tools.
+#   ./kali-setup.sh --optional  : Installs only the optional tools.
+#   ./kali-setup.sh --all       : Installs both core and optional tools.
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+# --- Tool Definitions ---
+# APT packages for core installation
+CORE_APT_TOOLS=(
+    "hashcat"
+    "seclists"
+    "docker.io" # Bloodhound dependency
+)
 
-echo -e "${GREEN}========================================${NC}"
-echo -e "${GREEN}HTB Cybernetics Lab Setup Script${NC}"
-echo -e "${GREEN}========================================${NC}\n"
+# Python tools to be installed via uv
+PYTHON_TOOLS=(
+    "git+https://github.com/Pennyw0rth/NetExec"
+    "git+https://github.com/ly4k/Certipy"
+    "git+https://github.com/ihebski/DefaultCreds-cheat-sheet"
+    "git+https://github.com/brightio/penelope"
+    "git+https://github.com/fortra/impacket"
+    "git+https://github.com/CravateRouge/bloodyAD"
+)
 
-# Install UV
-echo -e "${BLUE}[*] Installing UV package manager${NC}"
-curl -LsSf https://astral.sh/uv/install.sh | sh
-export PATH="$HOME/.local/bin:$PATH"
-uv cache clean
-echo -e "${GREEN}[✓] UV installed successfully${NC}\n"
+# Placeholder for optional tools
+OPTIONAL_TOOLS=()
 
-# Install Python tools via UV
-echo -e "${BLUE}[*] Installing Python tools via UV${NC}"
-sudo rm -rf /usr/local/bin/nxc /usr/local/bin/netexec /usr/share/impacket/
-hash -r
 
-echo -e "${YELLOW}  → Installing NetExec${NC}"
-uv tool install git+https://github.com/Pennyw0rth/NetExec
+# --- Function Definitions ---
 
-echo -e "${YELLOW}  → Installing Impacket${NC}"
-uv tool install git+https://github.com/fortra/impacket
+# Function to create the base directory structure
+setup_directories() {
+    echo "[+] Creating tool directory structure..."
+    # Use brace expansion for efficiency
+    mkdir -p "$HOME"/tools/{linux-binaries,linux-scripts,windows-binaries,windows-scripts,cross-platform}
+}
 
-echo -e "${YELLOW}  → Installing BloodyAD${NC}"
-uv tool install git+https://github.com/CravateRouge/bloodyAD
+# Function to decompress the rockyou wordlist if it hasn't been already
+decompress_rockyou() {
+    echo "[+] Checking RockYou wordlist..."
+    if [ ! -f "/usr/share/wordlists/rockyou.txt" ]; then
+        if [ -f "/usr/share/wordlists/rockyou.txt.gz" ]; then
+            echo "[+] Decompressing rockyou.txt.gz..."
+            sudo gunzip -k /usr/share/wordlists/rockyou.txt.gz
+        else
+            echo "[!] rockyou.txt.gz not found. It may have been moved or is not included in this seclists version."
+        fi
+    else
+        echo "[!] rockyou.txt is already decompressed. Skipping."
+    fi
+}
 
-echo -e "${GREEN}[✓] Python tools installed successfully${NC}\n"
+# Function to install Python tools using uv
+install_python_tools() {
+    echo "[+] Setting up Python tools with uv..."
+    # First, install uv if it's not already present
+    if ! command -v uv &> /dev/null; then
+        echo "[+] Installing uv..."
+        curl -LsSf https://astral.sh/uv/install.sh | sh
+        # The installer will prompt to add uv to the PATH. For the script to continue,
+        # we need to source the environment file.
+        source "$HOME/.cargo/env"
+    else
+        echo "[!] uv is already installed. Skipping installation."
+    fi
 
-# Create tools directory
-echo -e "${BLUE}[*] Creating tools directory${NC}"
-mkdir -p tools && cd tools
-echo -e "${GREEN}[✓] Directory created: $(pwd)${NC}\n"
+    echo "[+] Installing Python tools..."
+    for tool in "${PYTHON_TOOLS[@]}"; do
+        echo "    -> Installing ${tool##*/}" # Shows just the repo name
+        uv tool install "$tool"
+    done
+}
 
-# Install BloodHound
-echo -e "${BLUE}[*] Installing BloodHound${NC}"
-wget -q --show-progress https://github.com/SpecterOps/bloodhound-cli/releases/latest/download/bloodhound-cli-linux-amd64.tar.gz
-tar -xzf bloodhound-cli-linux-amd64.tar.gz
-rm bloodhound-cli-linux-amd64.tar.gz
+# Function to install Ligolo-NG
+install_ligolo_ng() {
+    echo "[+] Installing Ligolo-NG from GitHub..."
+    local LIGOLO_VERSION="0.8.3"
+    local INSTALL_DIR="$HOME/tools/cross-platform/ligolo-ng"
+    
+    if [ -f "$INSTALL_DIR/proxy" ]; then
+        echo "[!] Ligolo-NG proxy already found in $INSTALL_DIR. Skipping."
+        return
+    fi
 
-echo -e "${YELLOW}  → Starting Docker service${NC}"
-sudo systemctl start docker
+    mkdir -p "$INSTALL_DIR"
+    local AGENT_URL="https://github.com/nicocha30/ligolo-ng/releases/download/v${LIGOLO_VERSION}/ligolo-ng_agent_${LIGOLO_VERSION}_windows_amd64.zip"
+    local PROXY_URL="https://github.com/nicocha30/ligolo-ng/releases/download/v${LIGOLO_VERSION}/ligolo-ng_proxy_${LIGOLO_VERSION}_linux_amd64.tar.gz"
 
-echo -e "${YELLOW}  → Installing BloodHound via CLI${NC}"
-sudo ./bloodhound-cli install
+    echo "[+] Downloading Ligolo-NG assets..."
+    wget -q --show-progress -O "$INSTALL_DIR/agent.zip" "$AGENT_URL"
+    wget -q --show-progress -O "$INSTALL_DIR/proxy.tar.gz" "$PROXY_URL"
 
-echo -e "${GREEN}[✓] BloodHound installed successfully${NC}\n"
+    echo "[+] Extracting archives..."
+    unzip -o "$INSTALL_DIR/agent.zip" -d "$INSTALL_DIR"
+    tar -xzvf "$INSTALL_DIR/proxy.tar.gz" -C "$INSTALL_DIR"
+    
+    echo "[+] Cleaning up downloaded archives..."
+    rm "$INSTALL_DIR/agent.zip" "$INSTALL_DIR/proxy.tar.gz"
+    echo "[+] Ligolo-NG has been installed in $INSTALL_DIR"
+}
 
-# Download ligolo-ng
-echo -e "${BLUE}[*] Downloading ligolo-ng${NC}"
+# Function to install Bloodhound-CLI
+install_bloodhound_cli() {
+    echo "[+] Installing Bloodhound-CLI from GitHub..."
+    local INSTALL_DIR="$HOME/tools/cross-platform/bloodhound-cli"
 
-echo -e "${YELLOW}  → Downloading Windows agent${NC}"
-wget -q --show-progress https://github.com/nicocha30/ligolo-ng/releases/download/v0.8.3/ligolo-ng_agent_0.8.3_windows_amd64.zip
+    if [ -f "$INSTALL_DIR/bloodhound-cli" ]; then
+        echo "[!] Bloodhound-CLI already found in $INSTALL_DIR. Skipping."
+        return
+    fi
+    
+    # Enable and start Docker, a dependency for Bloodhound's backend
+    echo "[+] Ensuring Docker service is running..."
+    sudo systemctl enable --now docker
 
-echo -e "${YELLOW}  → Downloading Linux proxy${NC}"
-wget -q --show-progress https://github.com/nicocha30/ligolo-ng/releases/download/v0.8.3/ligolo-ng_proxy_0.8.3_linux_amd64.tar.gz
+    mkdir -p "$INSTALL_DIR"
+    local LATEST_URL="https://github.com/SpecterOps/bloodhound-cli/releases/latest/download/bloodhound-cli-linux-amd64.tar.gz"
 
-echo -e "${YELLOW}  → Extracting files${NC}"
-unzip -q ligolo-ng_agent_0.8.3_windows_amd64.zip
-tar -xzf ligolo-ng_proxy_0.8.3_linux_amd64.tar.gz
+    echo "[+] Downloading latest Bloodhound-CLI..."
+    wget -q --show-progress -O "$INSTALL_DIR/bloodhound.tar.gz" "$LATEST_URL"
 
-echo -e "${YELLOW}  → Cleaning up archives${NC}"
-rm ligolo-ng_agent_0.8.3_windows_amd64.zip ligolo-ng_proxy_0.8.3_linux_amd64.tar.gz
+    echo "[+] Extracting archive..."
+    tar -xzvf "$INSTALL_DIR/bloodhound.tar.gz" -C "$INSTALL_DIR"
+    
+    # Note: The 'install' command for bloodhound-cli is for setting up the backend,
+    # which you might want to do manually. The binary is now ready to use.
+    echo "[+] Bloodhound-CLI binary is ready at $INSTALL_DIR/bloodhound-cli"
+    
+    echo "[+] Cleaning up downloaded archive..."
+    rm "$INSTALL_DIR/bloodhound.tar.gz"
+}
 
-echo -e "${GREEN}[✓] ligolo-ng downloaded and extracted${NC}\n"
+# --- Main Installation Functions ---
 
-# Summary
-echo -e "${GREEN}========================================${NC}"
-echo -e "${GREEN}Setup completed successfully!${NC}"
-echo -e "${GREEN}========================================${NC}"
-echo -e "${YELLOW}Installed tools:${NC}"
-echo -e "  • UV package manager"
-echo -e "  • NetExec"
-echo -e "  • Impacket"
-echo -e "  • BloodyAD"
-echo -e "  • BloodHound"
-echo -e "  • ligolo-ng (proxy + agent)"
-echo -e "\n${YELLOW}Tools directory: $(pwd)${NC}\n"
+# This function orchestrates the installation of all core components
+install_core_tools() {
+    echo "========================================="
+    echo "  Starting Core Tool Installation"
+    echo "========================================="
+    
+    setup_directories
+    
+    echo "[+] Installing CORE tools via apt..."
+    sudo apt install -y "${CORE_APT_TOOLS[@]}"
+    
+    decompress_rockyou
+    install_python_tools
+    install_ligolo_ng
+    install_bloodhound_cli
+
+    echo "========================================="
+    echo "  Core Tool Installation Complete"
+    echo "========================================="
+}
+
+# Placeholder for optional tools installation
+install_optional_tools() {
+    echo "[+] Installing OPTIONAL tools..."
+    if [ ${#OPTIONAL_TOOLS[@]} -eq 0 ]; then
+        echo "[!] Optional tools list is empty. Nothing to install."
+    else
+        sudo apt install -y "${OPTIONAL_TOOLS[@]}"
+    fi
+}
+
+# --- Main Script Logic ---
+
+if [ -z "$1" ]; then
+    echo "[-] Error: No option selected."
+    echo "[-] Please run the script with one of the following options:"
+    echo "    --core      : Installs only the core tools."
+    echo "    --optional  : Installs only the optional tools."
+    echo "    --all       : Installs both core and optional tools."
+    exit 1
+fi
+
+echo "[+] Starting system update and upgrade..."
+sudo apt update && sudo apt upgrade -y
+echo "[+] System is now up to date."
+
+case "$1" in
+    --core)
+        install_core_tools
+        ;;
+    --optional)
+        install_optional_tools
+        ;;
+    --all)
+        install_core_tools
+        install_optional_tools
+        ;;
+    *)
+        echo "[-] Error: Invalid option '$1'."
+        echo "[-] Please use --core, --optional, or --all."
+        exit 1
+        ;;
+esac
+
+echo "[*] Script execution finished."
