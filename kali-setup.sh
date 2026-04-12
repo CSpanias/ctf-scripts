@@ -16,6 +16,7 @@
 CORE_APT_TOOLS=(
     "hashcat"
     "seclists"
+    "wordlists"
     "docker.io" # Bloodhound dependency
 )
 
