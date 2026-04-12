@@ -15,8 +15,7 @@
 # APT packages for core installation
 CORE_APT_TOOLS=(
     "hashcat"
-    "seclists"
-    "wodlists"
+    "wordlists"
     "docker.io" # Bloodhound dependency
 )
 
