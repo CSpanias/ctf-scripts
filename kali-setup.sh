@@ -16,7 +16,7 @@
 CORE_APT_TOOLS=(
     "hashcat"
     "seclists"
-    "wordlists"
+    "wodlists"
     "docker.io" # Bloodhound dependency
 )
 
@@ -39,7 +39,6 @@ OPTIONAL_TOOLS=()
 # Function to create the base directory structure
 setup_directories() {
     echo "[+] Creating tool directory structure..."
-    # Use brace expansion for efficiency
     mkdir -p "$HOME"/tools/{linux-binaries,linux-scripts,windows-binaries,windows-scripts,cross-platform}
 }
 
@@ -61,20 +60,25 @@ decompress_rockyou() {
 # Function to install Python tools using uv
 install_python_tools() {
     echo "[+] Setting up Python tools with uv..."
+    
     # First, install uv if it's not already present
     if ! command -v uv &> /dev/null; then
         echo "[+] Installing uv..."
         curl -LsSf https://astral.sh/uv/install.sh | sh
-        # The installer will prompt to add uv to the PATH. For the script to continue,
-        # we need to source the environment file.
-        source "$HOME/.cargo/env"
+        
+        # The uv installer places the binary in ~/.local/bin.
+        # We must add this directory to the PATH for the current script session.
+        export PATH="$HOME/.local/bin:$PATH"
     else
         echo "[!] uv is already installed. Skipping installation."
     fi
 
     echo "[+] Installing Python tools..."
     for tool in "${PYTHON_TOOLS[@]}"; do
-        echo "    -> Installing ${tool##*/}" # Shows just the repo name
+        # Using basename to get a cleaner name from the git URL
+        local tool_name
+        tool_name=$(basename "$tool")
+        echo "    -> Installing ${tool_name%.*}" # Removes .git extension
         uv tool install "$tool"
     done
 }
@@ -130,8 +134,6 @@ install_bloodhound_cli() {
     echo "[+] Extracting archive..."
     tar -xzvf "$INSTALL_DIR/bloodhound.tar.gz" -C "$INSTALL_DIR"
     
-    # Note: The 'install' command for bloodhound-cli is for setting up the backend,
-    # which you might want to do manually. The binary is now ready to use.
     echo "[+] Bloodhound-CLI binary is ready at $INSTALL_DIR/bloodhound-cli"
     
     echo "[+] Cleaning up downloaded archive..."
@@ -140,7 +142,6 @@ install_bloodhound_cli() {
 
 # --- Main Installation Functions ---
 
-# This function orchestrates the installation of all core components
 install_core_tools() {
     echo "========================================="
     echo "  Starting Core Tool Installation"
@@ -161,7 +162,6 @@ install_core_tools() {
     echo "========================================="
 }
 
-# Placeholder for optional tools installation
 install_optional_tools() {
     echo "[+] Installing OPTIONAL tools..."
     if [ ${#OPTIONAL_TOOLS[@]} -eq 0 ]; then
